@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"net/http"
 	"os"
 
 	"github.com/g1lom/guardrail-serve/internal/app"
@@ -18,7 +20,7 @@ func main() {
 	}
 
 	logger.Info("guardrail-serve listening", "listen_addr", cfg.ListenAddr(), "log_format", cfg.LogFormat)
-	if err := server.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("serve http", "error", err)
 		os.Exit(1)
 	}
