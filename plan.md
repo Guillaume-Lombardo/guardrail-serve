@@ -155,3 +155,11 @@ For any non-trivial feature or migration:
   - request completion logs now support `human` and `json` formats
   - `X-Request-ID` is echoed back to clients and included in structured request logs
   - a dedicated ADR records the observability decision
+- Planned in the third Phase 2 slice:
+  - reject schema variants that are currently ignored silently
+  - require at least one text item for scan execution
+  - return explicit validation errors when unsupported multimodal/tool fields are present
+- Implemented in the third Phase 2 slice:
+  - requests without `texts` are now rejected explicitly
+  - non-empty unsupported fields are rejected instead of being ignored
+  - README now documents the current text-only request contract

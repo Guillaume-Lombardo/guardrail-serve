@@ -27,6 +27,8 @@ HTTP errors are returned as JSON with a `detail` field.
 
 Payload guardrail limits are configured through `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS`. Non-positive or invalid values fall back to the documented defaults.
 
+Current request validation is text-first: each scan request must include at least one `texts` entry, and non-empty `images`, `tools`, `tool_calls`, `structured_messages`, and `request_data` fields are rejected until those inputs are supported explicitly.
+
 Each request returns an `X-Request-ID` header. If the client provides `X-Request-ID`, the service reuses it for request correlation.
 
 ## Logging

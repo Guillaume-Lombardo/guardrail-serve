@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -176,6 +177,10 @@ func decodeRequest(writer http.ResponseWriter, request *http.Request) (domain.Re
 		writeError(writer, request, http.StatusBadRequest, "Invalid input_type. Expected 'request' or 'response'.")
 		return domain.Request{}, false
 	}
+	if detail, ok := validateRequestPayload(payload); !ok {
+		writeError(writer, request, http.StatusBadRequest, detail)
+		return domain.Request{}, false
+	}
 
 	return payload, true
 }
@@ -263,6 +268,36 @@ func recordError(ctx context.Context, detail string) {
 		return
 	}
 	requestMetadata.ErrorDetail = detail
+}
+
+func validateRequestPayload(payload domain.Request) (string, bool) {
+	if len(payload.Texts) == 0 {
+		return "At least one text item is required.", false
+	}
+
+	unsupportedFields := make([]string, 0, 5)
+	if len(payload.Images) > 0 {
+		unsupportedFields = append(unsupportedFields, "images")
+	}
+	if len(payload.Tools) > 0 {
+		unsupportedFields = append(unsupportedFields, "tools")
+	}
+	if len(payload.ToolCalls) > 0 {
+		unsupportedFields = append(unsupportedFields, "tool_calls")
+	}
+	if len(payload.StructuredMessages) > 0 {
+		unsupportedFields = append(unsupportedFields, "structured_messages")
+	}
+	if len(payload.RequestData) > 0 {
+		unsupportedFields = append(unsupportedFields, "request_data")
+	}
+
+	if len(unsupportedFields) > 0 {
+		sort.Strings(unsupportedFields)
+		return fmt.Sprintf("Unsupported request fields: %s.", strings.Join(unsupportedFields, ", ")), false
+	}
+
+	return "", true
 }
 
 type statusRecorder struct {
