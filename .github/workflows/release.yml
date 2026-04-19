@@ -4,121 +4,40 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      publish_target:
-        description: "Target registry"
-        required: true
-        default: "testpypi"
-        type: choice
-        options:
-          - testpypi
-          - pypi
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build distribution
+    name: Build binaries
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          python-version: "3.13"
+          go-version-file: go.mod
+          cache: true
 
-      - name: Validate release tag matches project version
+      - name: Build binary
         env:
-          PUBLISH_TARGET: ${{ inputs.publish_target }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
         run: |
-          python - <<'PY'
-          import os
-          import pathlib
-          import tomllib
+          mkdir -p dist
+          output="dist/guardrail-serve-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -trimpath -ldflags="-s -w" -o "${output}" ./cmd/guardrail-serve
 
-          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-          publish_target = os.environ.get("PUBLISH_TARGET")
-
-          pyproject = pathlib.Path('pyproject.toml')
-          data = tomllib.loads(pyproject.read_text(encoding='utf-8'))
-          version = data['project']['version']
-
-          if event_name == "release":
-              tag = '${{ github.event.release.tag_name }}'
-              normalized_tag = tag.removeprefix('v')
-              if normalized_tag != version:
-                  raise SystemExit(
-                      f"Release tag '{tag}' does not match project version '{version}'."
-                  )
-              print(f"Tag/version check OK: {normalized_tag} == {version}")
-          elif event_name == "workflow_dispatch" and publish_target == "pypi":
-              raise SystemExit(
-                  "Manual publishing to PyPI is not allowed without a GitHub release tag. "
-                  "Create and publish a GitHub release to publish this version to PyPI."
-              )
-          else:
-              print(
-                  f"Skipping tag/version validation for event '{event_name}' "
-                  f"with publish_target='{publish_target}'."
-              )
-          PY
-
-      - name: Install build backend
-        run: python -m pip install --upgrade build twine
-
-      - name: Build source and wheel distributions
-        run: python -m build
-
-      - name: Validate metadata
-        run: twine check dist/*
-
-      - name: Upload dist artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: guardrail-serve-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
-
-  publish-testpypi:
-    name: Publish to TestPyPI
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_target == 'testpypi'
-    permissions:
-      id-token: write
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/guardrail-serve
-    steps:
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      - name: Publish package distributions to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
-  publish-pypi:
-    name: Publish to PyPI
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'pypi')
-    permissions:
-      id-token: write
-    environment:
-      name: pypi
-      url: https://pypi.org/p/guardrail-serve
-    steps:
-      - name: Download dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1

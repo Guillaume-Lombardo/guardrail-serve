@@ -35,12 +35,10 @@
 
 ## Validation
 
-- [ ] `uv run ruff format .`
-- [ ] `uv run ruff check .`
-- [ ] `uv run ty check src tests`
-- [ ] `uv run pytest -m unit`
-- [ ] `uv run pytest -m integration --no-cov`
-- [ ] `uv run pytest -m end2end`
-- [ ] `uv run pre-commit run --all-files`
+- [ ] `gofmt -w .`
+- [ ] `go test ./...`
+- [ ] `go test ./tests/integration/...`
+- [ ] `go test ./tests/end2end/...`
+- [ ] `pre-commit run --all-files`
 
 ## Notes
