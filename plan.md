@@ -119,22 +119,27 @@ For any non-trivial feature or migration:
 
 #### Steps
 
-- [ ] Audit the current HTTP/request/config contract and identify the missing edge cases.
-- [ ] Add failing tests for the selected contract-hardening cases.
-- [ ] Implement the validation and error-handling adjustments.
-- [ ] Add config/resource override coverage.
-- [ ] Update documentation if the contract becomes stricter or clearer.
-- [ ] Run formatting, unit, integration, end-to-end, and pre-commit validation.
+- [x] Audit the current HTTP/request/config contract and identify the missing edge cases.
+- [x] Add failing tests for the selected contract-hardening cases.
+- [x] Implement the validation and error-handling adjustments.
+- [x] Add config/resource override coverage.
+- [x] Update documentation if the contract becomes stricter or clearer.
+- [x] Run formatting, unit, integration, end-to-end, and pre-commit validation.
 
 #### Validation
 
-- [ ] `gofmt -w .`
-- [ ] `go test ./...`
-- [ ] `go test ./tests/integration/...`
-- [ ] `go test ./tests/end2end/...`
-- [ ] `pre-commit run --all-files`
+- [x] `gofmt -w .`
+- [x] `go test ./...`
+- [x] `go test ./tests/integration/...`
+- [x] `go test ./tests/end2end/...`
+- [x] `pre-commit run --all-files`
 
 #### Notes / Decisions
 
 - Decision: Prioritize contract hardening before optional semantic guardrails.
 - Rationale: The current base is functional; the highest-value next step is to stabilize inputs, errors, and config behavior so future adapters do not accumulate ambiguity on top of an underspecified API.
+- Implemented in this first Phase 2 slice:
+  - method-not-allowed responses now use the JSON error contract
+  - request bodies with trailing JSON content are rejected as invalid
+  - non-positive `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS` values now fall back to defaults
+  - resource override precedence and default fallback are covered by tests

@@ -23,6 +23,10 @@ The decision contract is:
 - `BLOCKED`
 - `GUARDRAIL_INTERVENED`
 
+HTTP errors are returned as JSON with a `detail` field.
+
+Payload guardrail limits are configured through `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS`. Non-positive or invalid values fall back to the documented defaults.
+
 ## Development Workflow
 
 ```bash

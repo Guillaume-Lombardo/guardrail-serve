@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -52,7 +54,7 @@ func (h *Handler) path(route string) string {
 
 func (h *Handler) handleHealth(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
-		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		writeMethodNotAllowed(writer)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
@@ -61,7 +63,7 @@ func (h *Handler) handleHealth(writer http.ResponseWriter, request *http.Request
 func (h *Handler) wrapGuardrail(guardrail domain.Guardrail) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
-			http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			writeMethodNotAllowed(writer)
 			return
 		}
 
@@ -80,7 +82,7 @@ func (h *Handler) wrapGuardrail(guardrail domain.Guardrail) http.HandlerFunc {
 
 func (h *Handler) handleLiteLLM(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
-		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		writeMethodNotAllowed(writer)
 		return
 	}
 
@@ -133,6 +135,10 @@ func decodeRequest(writer http.ResponseWriter, request *http.Request) (domain.Re
 		writeError(writer, http.StatusBadRequest, "Invalid JSON request body.")
 		return domain.Request{}, false
 	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(writer, http.StatusBadRequest, "Invalid JSON request body.")
+		return domain.Request{}, false
+	}
 
 	payload.Normalize()
 	if !payload.InputType.IsValid() {
@@ -153,6 +159,10 @@ func validateScope(writer http.ResponseWriter, scope domain.Scope, guardrailName
 		fmt.Sprintf("Guardrail '%s' does not support scope '%s'", guardrailName, scope),
 	)
 	return false
+}
+
+func writeMethodNotAllowed(writer http.ResponseWriter) {
+	writeError(writer, http.StatusMethodNotAllowed, "Method not allowed.")
 }
 
 func writeError(writer http.ResponseWriter, status int, detail string) {

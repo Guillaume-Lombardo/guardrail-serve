@@ -55,6 +55,10 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 
+	if parsed <= 0 {
+		return fallback
+	}
+
 	return parsed
 }
 
