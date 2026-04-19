@@ -22,7 +22,7 @@ For any non-trivial feature or migration:
 
 ## Initiative: Go Guardrail Service Bootstrap
 
-- Status: `in_progress`
+- Status: `completed`
 - Owner: `agent`
 - Objective:
   Build a native Go implementation of the archived Python guardrail API, starting with deterministic request/response guardrails on `/scan/*` and `/beta/litellm_basic_guardrail_api`.
@@ -69,11 +69,11 @@ For any non-trivial feature or migration:
 
 #### Validation
 
-- [ ] `gofmt -w .`
-- [ ] `go test ./...`
-- [ ] `go test ./tests/integration/...`
-- [ ] `go test ./tests/end2end/...`
-- [ ] `pre-commit run --all-files`
+- [x] `gofmt -w .`
+- [x] `go test ./...`
+- [x] `go test ./tests/integration/...`
+- [x] `go test ./tests/end2end/...`
+- [x] `pre-commit run --all-files`
 
 #### Notes / Decisions
 
@@ -82,3 +82,84 @@ For any non-trivial feature or migration:
 - Follow-up: Extend the service with optional embedding-backed and LLM-backed guardrails on a future dedicated branch.
 - GitHub bootstrap: repository created and `main` pushed to `https://github.com/Guillaume-Lombardo/guardrail-serve`.
 - ADR record: `docs/adr/0001-go-guardrail-service-foundation.md`
+- Closure note: validation now passes from the dedicated branch `codex/phase2-contract-hardening`, restoring compliance with the repository delivery workflow.
+
+## Initiative: Phase 2 Contract Hardening
+
+- Status: `in_progress`
+- Owner: `agent`
+- Objective:
+  Harden the first Go API contract before adding semantic guardrails by tightening request validation, clarifying HTTP error behavior, and covering config/resource override behavior with targeted tests.
+- In scope:
+  - review and tighten JSON request validation for supported fields and edge cases
+  - make HTTP error responses explicit and consistent across route families
+  - validate config parsing and boundary defaults for environment-driven settings
+  - validate YAML resource override loading behavior with focused integration coverage
+  - propagate a request-scoped context through the HTTP handling and guardrail execution path
+  - add configurable structured logging with JSON and human-readable output modes
+  - log request outcomes with enough context to analyze successes and failures in production
+  - update README and related docs if public behavior or config expectations change
+- Out of scope:
+  - embedding-backed guardrails
+  - LLM-provider integrations
+  - large transport refactors or framework changes
+  - release automation expansion beyond the current workflows
+- Constraints:
+  - preserve the current decision contract `NONE | BLOCKED | GUARDRAIL_INTERVENED`
+  - keep the implementation stdlib-first and dependency-light
+  - do not broaden the public API surface without documenting it
+  - keep tests deterministic with fixed fixtures and no hidden network access
+- Risks:
+  - over-correcting validation in a way that breaks intended compatibility with the archived external contract
+  - mixing behavioral hardening with larger feature work and losing review clarity
+- Acceptance criteria:
+  - malformed or unsupported requests produce explicit and consistent HTTP responses
+  - config defaults and invalid env values are covered by tests
+  - override resource loading behavior is covered by tests
+  - README/config docs match the enforced runtime contract
+- ADR impact: `yes`
+- ADR reference(s): `docs/adr/0001-go-guardrail-service-foundation.md`, `docs/adr/0002-request-context-and-structured-logging.md`
+
+#### Steps
+
+- [x] Audit the current HTTP/request/config contract and identify the missing edge cases.
+- [x] Add failing tests for the selected contract-hardening cases.
+- [x] Implement the validation and error-handling adjustments.
+- [x] Add config/resource override coverage.
+- [x] Update documentation if the contract becomes stricter or clearer.
+- [x] Run formatting, unit, integration, end-to-end, and pre-commit validation.
+
+#### Validation
+
+- [x] `gofmt -w .`
+- [x] `go test ./...`
+- [x] `go test ./tests/integration/...`
+- [x] `go test ./tests/end2end/...`
+- [x] `pre-commit run --all-files`
+
+#### Notes / Decisions
+
+- Decision: Prioritize contract hardening before optional semantic guardrails.
+- Rationale: The current base is functional; the highest-value next step is to stabilize inputs, errors, and config behavior so future adapters do not accumulate ambiguity on top of an underspecified API.
+- Implemented in this first Phase 2 slice:
+  - method-not-allowed responses now use the JSON error contract
+  - request bodies with trailing JSON content are rejected as invalid
+  - non-positive `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS` values now fall back to defaults
+  - resource override precedence and default fallback are covered by tests
+- Planned in the next Phase 2 slice:
+  - introduce request-scoped context propagation from HTTP entrypoints into guardrail execution
+  - emit structured request logs with configurable `human` or `json` formatting
+  - include contextual fields such as request id, route, guardrail, scope, decision, status, and duration in request logs
+- Implemented in the second Phase 2 slice:
+  - request-scoped context is now propagated through the HTTP handling and guardrail execution path
+  - request completion logs now support `human` and `json` formats
+  - `X-Request-ID` is echoed back to clients and included in structured request logs
+  - a dedicated ADR records the observability decision
+- Planned in the third Phase 2 slice:
+  - reject schema variants that are currently ignored silently
+  - require at least one text item for scan execution
+  - return explicit validation errors when unsupported multimodal/tool fields are present
+- Implemented in the third Phase 2 slice:
+  - requests without `texts` are now rejected explicitly
+  - non-empty unsupported fields are rejected instead of being ignored
+  - README now documents the current text-only request contract

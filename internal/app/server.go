@@ -2,17 +2,24 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/g1lom/guardrail-serve/internal/config"
 	"github.com/g1lom/guardrail-serve/internal/domain"
 	"github.com/g1lom/guardrail-serve/internal/guardrails"
 	"github.com/g1lom/guardrail-serve/internal/httpapi"
+	"github.com/g1lom/guardrail-serve/internal/observability"
 	"github.com/g1lom/guardrail-serve/internal/resources"
 )
 
 func NewServer(cfg config.Config) (*http.Server, error) {
-	handler, err := NewHandler(cfg)
+	logger := observability.NewDefaultLogger(cfg.LogFormat, cfg.ProjectName)
+	return NewServerWithLogger(cfg, logger)
+}
+
+func NewServerWithLogger(cfg config.Config, logger *slog.Logger) (*http.Server, error) {
+	handler, err := NewHandlerWithLogger(cfg, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -24,6 +31,11 @@ func NewServer(cfg config.Config) (*http.Server, error) {
 }
 
 func NewHandler(cfg config.Config) (http.Handler, error) {
+	logger := observability.NewDefaultLogger(cfg.LogFormat, cfg.ProjectName)
+	return NewHandlerWithLogger(cfg, logger)
+}
+
+func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler, error) {
 	secretPatterns, err := resources.LoadPatterns(cfg.GuardrailsConfigDir, "detect_secret_contextual_patterns.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("load secret patterns: %w", err)
@@ -52,9 +64,9 @@ func NewHandler(cfg config.Config) (http.Handler, error) {
 
 	maxLengthGuardrail := guardrails.NewMaxLengthGuardrail(cfg.MaxTextItems, cfg.MaxTextChars)
 	registry := domain.NewRegistry(maxLengthGuardrail, secretGuardrail, piiGuardrail, promptGuardrail)
-	apiHandler := httpapi.NewHandler(cfg, registry, maxLengthGuardrail, secretGuardrail, piiGuardrail, promptGuardrail)
+	apiHandler := httpapi.NewHandler(cfg, logger, registry, maxLengthGuardrail, secretGuardrail, piiGuardrail, promptGuardrail)
 
 	mux := http.NewServeMux()
 	apiHandler.Register(mux)
-	return mux, nil
+	return apiHandler.WithObservability(mux), nil
 }
