@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run ty check src tests
+
+      - name: Unit tests
+        run: uv run pytest -m unit --no-cov
+
+      - name: Integration tests
+        run: uv run pytest -m integration --no-cov
+
+      - name: End2end tests
+        run: uv run pytest -m end2end --no-cov
+
+      - name: Pre-commit
+        run: uv run pre-commit run --all-files

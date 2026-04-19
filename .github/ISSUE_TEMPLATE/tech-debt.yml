@@ -1,0 +1,42 @@
+name: "Tech Debt / Refactor"
+description: "Track technical debt or refactor"
+title: "[TechDebt] "
+labels:
+  - tech-debt
+
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Describe the debt or problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks
+      description: |
+        - Potential bugs:
+        - Maintenance impact:
+    validations:
+      required: false
+
+  - type: textarea
+    id: minimal_scope
+    attributes:
+      label: Minimal scope
+      description: What must be done to consider the debt resolved.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      options:
+        - label: Criterion 1
+        - label: Criterion 2
+    validations:
+      required: false
