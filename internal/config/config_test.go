@@ -25,3 +25,13 @@ func TestLoadTrimsAndNormalizesPrefix(t *testing.T) {
 		t.Fatalf("APIPrefix = %q, want %q", got, want)
 	}
 }
+
+func TestLoadNormalizesLogFormat(t *testing.T) {
+	t.Setenv("LOG_FORMAT", "TEXT")
+
+	cfg := Load()
+
+	if got, want := cfg.LogFormat, "human"; got != want {
+		t.Fatalf("LogFormat = %q, want %q", got, want)
+	}
+}

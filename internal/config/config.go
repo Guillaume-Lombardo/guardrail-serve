@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/g1lom/guardrail-serve/internal/observability"
 )
 
 type Config struct {
@@ -16,6 +18,7 @@ type Config struct {
 	GuardrailsConfigDir  string
 	MaxTextItems         int
 	MaxTextChars         int
+	LogFormat            string
 }
 
 func Load() Config {
@@ -29,6 +32,7 @@ func Load() Config {
 		GuardrailsConfigDir:  strings.TrimSpace(os.Getenv("GUARDRAILS_CONFIG_DIR")),
 		MaxTextItems:         getEnvInt("MAX_TEXT_ITEMS", 20),
 		MaxTextChars:         getEnvInt("MAX_TEXT_CHARS", 20000),
+		LogFormat:            observability.NormalizeLogFormat(os.Getenv("LOG_FORMAT")),
 	}
 }
 

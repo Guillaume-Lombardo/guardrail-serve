@@ -9,6 +9,7 @@ import (
 
 	"github.com/g1lom/guardrail-serve/internal/app"
 	"github.com/g1lom/guardrail-serve/internal/config"
+	"github.com/g1lom/guardrail-serve/internal/observability"
 )
 
 func TestLiteLLMHandlerUsesConfiguredGuardrail(t *testing.T) {
@@ -146,5 +147,77 @@ func TestHandlerReturnsJSONForMethodNotAllowed(t *testing.T) {
 	}
 	if got, want := response["detail"], "Method not allowed."; got != want {
 		t.Fatalf("detail = %q, want %q", got, want)
+	}
+}
+
+func TestHandlerPropagatesRequestIDAndLogsRequestContext(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	logger := observability.NewLogger(&logs, "json", "guardrail-serve")
+	handler, err := app.NewHandlerWithLogger(config.Config{
+		ProjectName:          "guardrail-serve",
+		LogFormat:            "json",
+		SecretMask:           "[REDACTED]",
+		LiteLLMGuardrailName: "detect_secret",
+		MaxTextItems:         20,
+		MaxTextChars:         20000,
+	}, logger)
+	if err != nil {
+		t.Fatalf("new handler: %v", err)
+	}
+
+	requestBody := map[string]any{
+		"texts":      []string{"token=tok_456"},
+		"input_type": "request",
+	}
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/scan/secrets", bytes.NewReader(body))
+	request.Header.Set("X-Request-ID", "req-123")
+	request.Header.Set("User-Agent", "integration-test")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if got, want := recorder.Header().Get("X-Request-ID"), "req-123"; got != want {
+		t.Fatalf("X-Request-ID = %q, want %q", got, want)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n"))
+	if len(lines) == 0 {
+		t.Fatal("log output is empty")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(lines[len(lines)-1], &payload); err != nil {
+		t.Fatalf("unmarshal log payload: %v", err)
+	}
+
+	if got, want := payload["request_id"], "req-123"; got != want {
+		t.Fatalf("request_id = %v, want %v", got, want)
+	}
+	if got, want := payload["guardrail"], "detect_secret"; got != want {
+		t.Fatalf("guardrail = %v, want %v", got, want)
+	}
+	if got, want := payload["input_type"], "request"; got != want {
+		t.Fatalf("input_type = %v, want %v", got, want)
+	}
+	if got, want := payload["decision"], "GUARDRAIL_INTERVENED"; got != want {
+		t.Fatalf("decision = %v, want %v", got, want)
+	}
+	if got, want := payload["status_code"], float64(http.StatusOK); got != want {
+		t.Fatalf("status_code = %v, want %v", got, want)
+	}
+	if got, want := payload["path"], "/scan/secrets"; got != want {
+		t.Fatalf("path = %v, want %v", got, want)
+	}
+	if payload["msg"] != "request completed" {
+		t.Fatalf("msg = %v, want request completed", payload["msg"])
 	}
 }

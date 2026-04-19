@@ -27,6 +27,17 @@ HTTP errors are returned as JSON with a `detail` field.
 
 Payload guardrail limits are configured through `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS`. Non-positive or invalid values fall back to the documented defaults.
 
+Each request returns an `X-Request-ID` header. If the client provides `X-Request-ID`, the service reuses it for request correlation.
+
+## Logging
+
+Logging uses the Go stdlib `log/slog` stack.
+
+- `LOG_FORMAT=human` emits readable text logs for local development and operator inspection
+- `LOG_FORMAT=json` emits structured JSON logs for export pipelines and machine processing
+
+Request logs include contextual fields such as request id, method, path, guardrail, input type, decision, status code, and duration.
+
 ## Development Workflow
 
 ```bash

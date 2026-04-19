@@ -95,6 +95,9 @@ For any non-trivial feature or migration:
   - make HTTP error responses explicit and consistent across route families
   - validate config parsing and boundary defaults for environment-driven settings
   - validate YAML resource override loading behavior with focused integration coverage
+  - propagate a request-scoped context through the HTTP handling and guardrail execution path
+  - add configurable structured logging with JSON and human-readable output modes
+  - log request outcomes with enough context to analyze successes and failures in production
   - update README and related docs if public behavior or config expectations change
 - Out of scope:
   - embedding-backed guardrails
@@ -114,8 +117,8 @@ For any non-trivial feature or migration:
   - config defaults and invalid env values are covered by tests
   - override resource loading behavior is covered by tests
   - README/config docs match the enforced runtime contract
-- ADR impact: `maybe`
-- ADR reference(s): `docs/adr/0001-go-guardrail-service-foundation.md`
+- ADR impact: `yes`
+- ADR reference(s): `docs/adr/0001-go-guardrail-service-foundation.md`, `docs/adr/0002-request-context-and-structured-logging.md`
 
 #### Steps
 
@@ -143,3 +146,12 @@ For any non-trivial feature or migration:
   - request bodies with trailing JSON content are rejected as invalid
   - non-positive `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS` values now fall back to defaults
   - resource override precedence and default fallback are covered by tests
+- Planned in the next Phase 2 slice:
+  - introduce request-scoped context propagation from HTTP entrypoints into guardrail execution
+  - emit structured request logs with configurable `human` or `json` formatting
+  - include contextual fields such as request id, route, guardrail, scope, decision, status, and duration in request logs
+- Implemented in the second Phase 2 slice:
+  - request-scoped context is now propagated through the HTTP handling and guardrail execution path
+  - request completion logs now support `human` and `json` formats
+  - `X-Request-ID` is echoed back to clients and included in structured request logs
+  - a dedicated ADR records the observability decision
