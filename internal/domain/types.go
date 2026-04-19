@@ -1,5 +1,7 @@
 package domain
 
+import "context"
+
 type Decision string
 
 const (
@@ -76,5 +78,5 @@ type Result struct {
 type Guardrail interface {
 	Name() string
 	Supports(Scope) bool
-	Apply(Payload) Result
+	Apply(context.Context, Payload) Result
 }

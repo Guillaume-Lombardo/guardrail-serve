@@ -1,6 +1,10 @@
 package guardrails
 
-import "github.com/g1lom/guardrail-serve/internal/domain"
+import (
+	"context"
+
+	"github.com/g1lom/guardrail-serve/internal/domain"
+)
 
 type PromptInjectionGuardrail struct {
 	patterns []compiledPattern
@@ -22,7 +26,7 @@ func (g *PromptInjectionGuardrail) Supports(scope domain.Scope) bool {
 	return scope == domain.ScopeRequest
 }
 
-func (g *PromptInjectionGuardrail) Apply(payload domain.Payload) domain.Result {
+func (g *PromptInjectionGuardrail) Apply(_ context.Context, payload domain.Payload) domain.Result {
 	matchedRules := make([]string, 0)
 	seen := map[string]struct{}{}
 

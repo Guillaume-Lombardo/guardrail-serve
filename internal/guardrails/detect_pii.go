@@ -1,6 +1,10 @@
 package guardrails
 
-import "github.com/g1lom/guardrail-serve/internal/domain"
+import (
+	"context"
+
+	"github.com/g1lom/guardrail-serve/internal/domain"
+)
 
 type DetectPIIGuardrail struct {
 	mask     string
@@ -23,7 +27,7 @@ func (g *DetectPIIGuardrail) Supports(scope domain.Scope) bool {
 	return scope == domain.ScopeRequest || scope == domain.ScopeResponse
 }
 
-func (g *DetectPIIGuardrail) Apply(payload domain.Payload) domain.Result {
+func (g *DetectPIIGuardrail) Apply(_ context.Context, payload domain.Payload) domain.Result {
 	output := make([]string, 0, len(payload.Texts))
 	modified := false
 

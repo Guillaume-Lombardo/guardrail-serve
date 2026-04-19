@@ -1,6 +1,7 @@
 package guardrails
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/g1lom/guardrail-serve/internal/domain"
@@ -26,7 +27,7 @@ func (g *MaxLengthGuardrail) Supports(scope domain.Scope) bool {
 	return scope == domain.ScopeRequest || scope == domain.ScopeResponse
 }
 
-func (g *MaxLengthGuardrail) Apply(payload domain.Payload) domain.Result {
+func (g *MaxLengthGuardrail) Apply(_ context.Context, payload domain.Payload) domain.Result {
 	if len(payload.Texts) > g.maxItems {
 		reason := fmt.Sprintf("Too many text items: %d > %d.", len(payload.Texts), g.maxItems)
 		return domain.Result{
