@@ -65,7 +65,7 @@ For any non-trivial feature or migration:
 - [ ] Record the first architectural decision in an ADR.
 - [ ] Implement the Go service and deterministic guardrails.
 - [ ] Add unit, integration, and end-to-end tests.
-- [ ] Initialize git locally and prepare GitHub bootstrap details.
+- [x] Initialize git locally and prepare GitHub bootstrap details.
 
 #### Validation
 
@@ -79,5 +79,6 @@ For any non-trivial feature or migration:
 
 - Decision: Start with deterministic regex-based and size-based guardrails in-process, and keep embeddings/LLM as optional future adapters.
 - Rationale: This matches the user goal of speed, determinism, and small deployment images while preserving a path for richer guardrails later.
-- Follow-up: Finalize GitHub remote ownership before initial push and PR automation.
+- Follow-up: Create the first feature PR from a dedicated working branch after the initial repository bootstrap.
+- GitHub bootstrap: repository created and `main` pushed to `https://github.com/Guillaume-Lombardo/guardrail-serve`.
 - ADR record: `docs/adr/0001-go-guardrail-service-foundation.md`
