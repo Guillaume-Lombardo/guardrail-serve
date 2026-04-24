@@ -2,6 +2,8 @@
 
 Native Go service for serving LLM guardrails.
 
+The public HTTP contract is exposed through `huma`, so the registered Go request/response types are the source of truth for the generated OpenAPI document and Swagger UI.
+
 ## Status
 
 This repository is migrating from the archived Python reference implementation in `archive/bdf-guardrails` to a native Go implementation focused on lower latency, smaller images, and clearer operational boundaries.
@@ -16,6 +18,9 @@ The first Go implementation serves deterministic guardrails on:
 - `/scan/pii`
 - `/scan/prompt-injection`
 - `/beta/litellm_basic_guardrail_api`
+- `/docs`
+- `/openapi.json`
+- `/openapi.yaml`
 
 The decision contract is:
 
@@ -24,6 +29,11 @@ The decision contract is:
 - `GUARDRAIL_INTERVENED`
 
 HTTP errors are returned as JSON with a `detail` field.
+Guardrail execution failures are returned as HTTP `502` with the stable JSON detail `Guardrail execution failed.`.
+
+Interactive Swagger UI is served on `/docs`.
+Generated OpenAPI is served on `/openapi.json` and `/openapi.yaml`.
+When `API_PREFIX` is configured, these routes are served under the same prefix.
 
 Payload guardrail limits are configured through `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS`. Non-positive or invalid values fall back to the documented defaults.
 

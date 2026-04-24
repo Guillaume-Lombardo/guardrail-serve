@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/g1lom/guardrail-serve/internal/app"
@@ -107,5 +108,55 @@ func TestEndToEndLiteLLMBasicGuardrailReturnsNoneWhenNoSecret(t *testing.T) {
 	}
 	if response.Reason != nil {
 		t.Fatalf("reason = %v, want nil", *response.Reason)
+	}
+}
+
+func TestEndToEndDocsAndOpenAPIAreExposed(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestHandler(t)
+
+	docsRequest := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	docsRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(docsRecorder, docsRequest)
+
+	if docsRecorder.Code != http.StatusOK {
+		t.Fatalf("docs status = %d, want %d", docsRecorder.Code, http.StatusOK)
+	}
+	if body := docsRecorder.Body.String(); !strings.Contains(body, "/openapi.json") {
+		t.Fatalf("docs body does not reference /openapi.json: %q", body)
+	}
+
+	jsonRequest := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
+	jsonRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(jsonRecorder, jsonRequest)
+
+	if jsonRecorder.Code != http.StatusOK {
+		t.Fatalf("openapi json status = %d, want %d", jsonRecorder.Code, http.StatusOK)
+	}
+
+	var spec struct {
+		OpenAPI string                    `json:"openapi"`
+		Paths   map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(jsonRecorder.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("decode openapi json: %v", err)
+	}
+	if spec.OpenAPI == "" {
+		t.Fatal("openapi version is empty")
+	}
+	if _, ok := spec.Paths["/scan/secrets"]; !ok {
+		t.Fatalf("paths missing /scan/secrets: %#v", spec.Paths)
+	}
+
+	yamlRequest := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	yamlRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(yamlRecorder, yamlRequest)
+
+	if yamlRecorder.Code != http.StatusOK {
+		t.Fatalf("openapi yaml status = %d, want %d", yamlRecorder.Code, http.StatusOK)
+	}
+	if body := yamlRecorder.Body.String(); !strings.Contains(body, "openapi: 3.1.0") {
+		t.Fatalf("openapi yaml missing version header: %q", body)
 	}
 }

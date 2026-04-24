@@ -27,7 +27,7 @@ func (g *DetectPIIGuardrail) Supports(scope domain.Scope) bool {
 	return scope == domain.ScopeRequest || scope == domain.ScopeResponse
 }
 
-func (g *DetectPIIGuardrail) Apply(_ context.Context, payload domain.Payload) domain.Result {
+func (g *DetectPIIGuardrail) Apply(_ context.Context, payload domain.Payload) (domain.Result, error) {
 	output := make([]string, 0, len(payload.Texts))
 	modified := false
 
@@ -61,12 +61,12 @@ func (g *DetectPIIGuardrail) Apply(_ context.Context, payload domain.Payload) do
 			Texts:    output,
 			Modified: true,
 			Decision: domain.DecisionGuardrailIntervened,
-		}
+		}, nil
 	}
 
 	return domain.Result{
 		Texts:    output,
 		Modified: false,
 		Decision: domain.DecisionNone,
-	}
+	}, nil
 }
