@@ -27,7 +27,7 @@ func (g *MaxLengthGuardrail) Supports(scope domain.Scope) bool {
 	return scope == domain.ScopeRequest || scope == domain.ScopeResponse
 }
 
-func (g *MaxLengthGuardrail) Apply(_ context.Context, payload domain.Payload) domain.Result {
+func (g *MaxLengthGuardrail) Apply(_ context.Context, payload domain.Payload) (domain.Result, error) {
 	if len(payload.Texts) > g.maxItems {
 		reason := fmt.Sprintf("Too many text items: %d > %d.", len(payload.Texts), g.maxItems)
 		return domain.Result{
@@ -35,7 +35,7 @@ func (g *MaxLengthGuardrail) Apply(_ context.Context, payload domain.Payload) do
 			Modified: false,
 			Decision: domain.DecisionBlocked,
 			Reason:   &reason,
-		}
+		}, nil
 	}
 
 	total := 0
@@ -49,12 +49,12 @@ func (g *MaxLengthGuardrail) Apply(_ context.Context, payload domain.Payload) do
 			Modified: false,
 			Decision: domain.DecisionBlocked,
 			Reason:   &reason,
-		}
+		}, nil
 	}
 
 	return domain.Result{
 		Texts:    payload.Texts,
 		Modified: false,
 		Decision: domain.DecisionNone,
-	}
+	}, nil
 }

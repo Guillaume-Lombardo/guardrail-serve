@@ -26,7 +26,7 @@ func (g *PromptInjectionGuardrail) Supports(scope domain.Scope) bool {
 	return scope == domain.ScopeRequest
 }
 
-func (g *PromptInjectionGuardrail) Apply(_ context.Context, payload domain.Payload) domain.Result {
+func (g *PromptInjectionGuardrail) Apply(_ context.Context, payload domain.Payload) (domain.Result, error) {
 	matchedRules := make([]string, 0)
 	seen := map[string]struct{}{}
 
@@ -48,7 +48,7 @@ func (g *PromptInjectionGuardrail) Apply(_ context.Context, payload domain.Paylo
 			Decision: domain.DecisionBlocked,
 			Reason:   stringPtr("Potential prompt injection detected."),
 			Metadata: map[string]any{"matched_rules": matchedRules},
-		}
+		}, nil
 	}
 
 	return domain.Result{
@@ -56,5 +56,5 @@ func (g *PromptInjectionGuardrail) Apply(_ context.Context, payload domain.Paylo
 		Modified: false,
 		Decision: domain.DecisionNone,
 		Metadata: map[string]any{"matched_rules": []string{}},
-	}
+	}, nil
 }
