@@ -117,8 +117,8 @@ func TestHandlerRejectsTrailingJSONPayload(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got := response["detail"]; !strings.Contains(got, "invalid character") {
-		t.Fatalf("detail = %q, want parse error detail", got)
+	if got, want := response["detail"], "Invalid JSON request body."; got != want {
+		t.Fatalf("detail = %q, want %q", got, want)
 	}
 }
 

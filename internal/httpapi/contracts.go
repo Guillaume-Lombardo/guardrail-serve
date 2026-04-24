@@ -3,14 +3,12 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"io"
 
 	"github.com/g1lom/guardrail-serve/internal/domain"
 )
 
 type scanRequestBody struct {
-	Texts              []string         `json:"texts,omitempty" doc:"Text items to scan."`
+	Texts              []string         `json:"texts,omitempty" doc:"Text items to scan." minItems:"1"`
 	Images             []string         `json:"images,omitempty" doc:"Currently unsupported placeholder for future multimodal support."`
 	Tools              []map[string]any `json:"tools,omitempty" doc:"Currently unsupported placeholder for future tool-aware evaluation."`
 	ToolCalls          []map[string]any `json:"tool_calls,omitempty" doc:"Currently unsupported placeholder for future tool-call evaluation."`
@@ -27,9 +25,6 @@ func (b *scanRequestBody) UnmarshalJSON(data []byte) error {
 
 	var payload alias
 	if err := decoder.Decode(&payload); err != nil {
-		return errInvalidJSON
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errInvalidJSON
 	}
 

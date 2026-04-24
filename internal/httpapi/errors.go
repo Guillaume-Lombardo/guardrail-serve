@@ -28,16 +28,17 @@ var errInvalidJSON = newStatusDetailError(http.StatusBadRequest, "Invalid JSON r
 func init() {
 	huma.NewErrorWithContext = func(ctx huma.Context, status int, msg string, errs ...error) huma.StatusError {
 		detail := msg
-		errorMessages := make([]string, 0, len(errs))
+		if status == http.StatusBadRequest && msg == "validation failed" {
+			detail = errInvalidJSON.Detail
+		}
 		for _, err := range errs {
 			if err == nil {
 				continue
 			}
-			errorMessages = append(errorMessages, err.Error())
-		}
-
-		if len(errorMessages) == 1 {
-			detail = errorMessages[0]
+			if stable, ok := err.(*errorResponse); ok {
+				detail = stable.Detail
+				break
+			}
 		}
 
 		recordError(ctx.Context(), detail)
