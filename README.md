@@ -35,7 +35,6 @@ Interactive Swagger UI is served on `/docs`.
 Generated OpenAPI is served on `/openapi.json` and `/openapi.yaml`.
 When `API_PREFIX` is configured, these routes are served under the same prefix.
 
-
 ### Route contracts
 
 All scan requests require at least one `texts` entry; `input_type` defaults to

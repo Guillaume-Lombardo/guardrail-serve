@@ -174,7 +174,7 @@ Status: validated by Guillaume; delivery in serialized merges after parallel wav
 - Wave 4: L6 optional HTTP classifier; L7 offline evaluation; L8 container metrics.
 
 - [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment.
-- [ ] L2: Runtime and authentication.
+- [x] L2: Runtime and authentication.
 - [ ] L3: Policy engine and findings.
 - [ ] L4: French normalization and PII.
 - [ ] L5: Native secrets with entropy/gitleaks.
@@ -187,3 +187,8 @@ authentication, configuration, maximum-length implementation or production chang
 
 L1 delivered with separate LiteLLM transport types, upstream payload regression
 coverage, strict scan compatibility, and ADR 0005. No environment contract change.
+
+L2 delivered in PR #5 with rune-based text limits, validated transport deadlines and
+body limits, optional multi-key authentication, bounded signal shutdown, and ADR
+0006. Full local validation and independent security review completed; final CI
+validates the branch integrated with L1. No production changes.
