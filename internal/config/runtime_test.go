@@ -22,3 +22,14 @@ func TestRuntimeRejectsInvalidEnvironment(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeRejectsBodyLimitAboveDecoderCeiling(t *testing.T) {
+	t.Setenv("HTTP_MAX_BODY_BYTES", "1048577")
+	if err := Load().Runtime.Validate(); err == nil {
+		t.Fatal("body limit above decoder ceiling accepted")
+	}
+	t.Setenv("HTTP_MAX_BODY_BYTES", "1048576")
+	if err := Load().Runtime.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

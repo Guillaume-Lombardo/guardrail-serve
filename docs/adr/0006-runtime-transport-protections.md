@@ -16,7 +16,9 @@ Authentication is disabled when no keys are configured.
 
 Buffer at most the configured body limit plus one byte before dispatch. This
 ensures unknown-length or malformed oversized JSON consistently returns 413,
-independent of the downstream decoder. Positive server read/write/idle deadlines
+independent of malformed JSON. Configuration is capped at 1 MiB to match the
+existing HTTP decoder ceiling; raising that ceiling requires a coordinated
+HTTP contract change. Positive server read/write/idle deadlines
 bound network operations; invalid environment settings reject startup. Zero runtime
 fields in programmatic configurations use safe defaults for existing callers.
 

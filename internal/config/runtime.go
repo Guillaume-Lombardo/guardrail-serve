@@ -90,8 +90,8 @@ func (r Runtime) Validate() error {
 			return fmt.Errorf("%s must be a positive duration", d.name)
 		}
 	}
-	if r.MaxBodyBytes <= 0 || r.MaxBodyBytes == 1<<63-1 {
-		return fmt.Errorf("HTTP_MAX_BODY_BYTES must be positive and less than MaxInt64")
+	if r.MaxBodyBytes <= 0 || r.MaxBodyBytes > 1<<20 {
+		return fmt.Errorf("HTTP_MAX_BODY_BYTES must be between 1 and 1048576")
 	}
 	for _, key := range r.APIKeys {
 		if key == "" || strings.ContainsAny(key, " \t\r\n") {

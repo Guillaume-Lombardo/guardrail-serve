@@ -60,7 +60,7 @@ Transport limits are independent of text limits:
 
 Timeouts accept positive Go durations such as `500ms` or `30s`; invalid,
 non-positive or overflowing settings fail startup. The body limit must be a
-positive integer less than MaxInt64. Oversized requests return HTTP `413`,
+positive integer from `1` to `1048576`, matching the HTTP decoder ceiling. Oversized requests return HTTP `413`,
 including bodies with unknown content length. Body read failures return `400`.
 On shutdown the server stops accepting connections, drains active requests, then
 closes remaining connections when the deadline expires.
