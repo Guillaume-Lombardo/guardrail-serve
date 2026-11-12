@@ -88,23 +88,19 @@ func TestEndToEndLiteLLMBasicGuardrailReturnsNoneWhenNoSecret(t *testing.T) {
 	}
 
 	var response struct {
-		Decision string         `json:"decision"`
-		Texts    []string       `json:"texts"`
-		Metadata map[string]any `json:"metadata"`
-		Reason   *string        `json:"reason"`
+		Action string   `json:"action"`
+		Texts  []string `json:"texts"`
+		Reason *string  `json:"blocked_reason"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if response.Decision != "NONE" {
-		t.Fatalf("decision = %s, want NONE", response.Decision)
+	if response.Action != "NONE" {
+		t.Fatalf("action = %s, want NONE", response.Action)
 	}
 	if got, want := response.Texts[0], "bonjour tout le monde"; got != want {
 		t.Fatalf("texts[0] = %q, want %q", got, want)
-	}
-	if got, want := response.Metadata["guardrail"], "detect_secret"; got != want {
-		t.Fatalf("metadata.guardrail = %v, want %v", got, want)
 	}
 	if response.Reason != nil {
 		t.Fatalf("reason = %v, want nil", *response.Reason)

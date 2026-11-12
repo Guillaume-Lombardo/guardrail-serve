@@ -174,7 +174,7 @@ func (h *Handler) handleGuardrail(
 	return newScanResponseOutput(response), nil
 }
 
-func (h *Handler) handleLiteLLM(ctx context.Context, input *scanRequestInput) (*scanResponseOutput, error) {
+func (h *Handler) handleLiteLLM(ctx context.Context, input *liteLLMRequestInput) (*liteLLMResponseOutput, error) {
 	request := input.Body.toDomain()
 	recordInputType(ctx, request)
 
@@ -205,7 +205,12 @@ func (h *Handler) handleLiteLLM(ctx context.Context, input *scanRequestInput) (*
 	}
 
 	recordResponse(ctx, request, response)
-	return newScanResponseOutput(response), nil
+	if len(response.Texts) != len(request.Texts) {
+		return nil, newStatusDetailError(http.StatusBadGateway, "Guardrail returned misaligned texts.")
+	}
+	return &liteLLMResponseOutput{Body: liteLLMResponseBody{
+		Action: response.Decision, BlockedReason: response.Reason, Texts: response.Texts,
+	}}, nil
 }
 
 func (h *Handler) applyChain(ctx context.Context, request domain.Request, endpointGuardrail domain.Guardrail) (domain.Response, error) {
@@ -304,7 +309,7 @@ func validateRequestPayload(payload domain.Request) (string, bool) {
 		return "At least one text item is required.", false
 	}
 
-	unsupportedFields := make([]string, 0, 5)
+	unsupportedFields := make([]string, 0, 4)
 	if len(payload.Images) > 0 {
 		unsupportedFields = append(unsupportedFields, "images")
 	}
@@ -316,9 +321,6 @@ func validateRequestPayload(payload domain.Request) (string, bool) {
 	}
 	if len(payload.StructuredMessages) > 0 {
 		unsupportedFields = append(unsupportedFields, "structured_messages")
-	}
-	if len(payload.RequestData) > 0 {
-		unsupportedFields = append(unsupportedFields, "request_data")
 	}
 
 	if len(unsupportedFields) > 0 {

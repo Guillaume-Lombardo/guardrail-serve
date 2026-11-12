@@ -163,3 +163,27 @@ For any non-trivial feature or migration:
   - requests without `texts` are now rejected explicitly
   - non-empty unsupported fields are rejected instead of being ignored
   - README now documents the current text-only request contract
+
+## Initiative: Phase 3 — production readiness
+
+Status: validated by Guillaume; delivery in serialized merges after parallel waves.
+
+- Wave 1: L1 LiteLLM contract; L2 runtime/auth.
+- Wave 2: L3 policy engine/findings.
+- Wave 3: L4 French normalization/PII; L5 native secrets entropy/gitleaks.
+- Wave 4: L6 optional HTTP classifier; L7 offline evaluation; L8 container metrics.
+
+- [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment.
+- [ ] L2: Runtime and authentication.
+- [ ] L3: Policy engine and findings.
+- [ ] L4: French normalization and PII.
+- [ ] L5: Native secrets with entropy/gitleaks.
+- [ ] L6: Optional HTTP classifier.
+- [ ] L7: Offline evaluation.
+- [ ] L8: Container and metrics.
+
+L1 scope: transport DTOs, dedicated contract tests and route documentation. No runtime,
+authentication, configuration, maximum-length implementation or production changes.
+
+L1 delivered with separate LiteLLM transport types, upstream payload regression
+coverage, strict scan compatibility, and ADR 0005. No environment contract change.
