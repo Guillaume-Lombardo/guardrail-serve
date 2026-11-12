@@ -192,3 +192,27 @@ L2 delivered in PR #5 with rune-based text limits, validated transport deadlines
 body limits, optional multi-key authentication, bounded signal shutdown, and ADR
 0006. Full local validation and independent security review completed; final CI
 validates the branch integrated with L1. No production changes.
+
+## C1: prompt-injection response scope correction
+
+- Validated scope: allow deterministic `prompt_injection` for both request and
+  response scanning, including LiteLLM pre-call and post-call.
+- Reproduce the response HTTP 400 with a failing local HTTP regression test
+  before changing production code; keep unknown scopes invalid.
+- Cover clean and injected texts on both HTTP contracts and both scopes.
+- Limit production changes to scope support. Diagnose other response limitations
+  without expanding this correction. No architecture or environment change.
+- Run formatting, all test scopes, pre-commit, dead-code review, independent
+  review, and CI; leave an open PR for the orchestrator's real LiteLLM journey.
+
+- Evidence: before the fix, the local HTTP response/injection test returned
+  400 with "Guardrail 'prompt_injection' does not support scope 'response'".
+  After the one-line support correction, both routes return 200/BLOCKED for
+  injections and 200/NONE for clean texts in both scopes; unknown scopes
+  still return 422.
+- Diagnosis: all other registered deterministic guardrails support response.
+  The optional semantic detector remains request-only and is not registered.
+- Validation: full Go suite, integration, end-to-end, formatting and pre-commit
+  passed with Go 1.26.11, GOMAXPROCS=2 and GOFLAGS=-p=1. Dead-code pass found no
+  obsolete production path or import. No environment contract changed, so
+  .env.template and local .env need no edits; no structural ADR is required.

@@ -23,7 +23,7 @@ func (g *PromptInjectionGuardrail) Name() string {
 }
 
 func (g *PromptInjectionGuardrail) Supports(scope domain.Scope) bool {
-	return scope == domain.ScopeRequest
+	return scope == domain.ScopeRequest || scope == domain.ScopeResponse
 }
 
 func (g *PromptInjectionGuardrail) Apply(_ context.Context, payload domain.Payload) (domain.Result, error) {

@@ -35,6 +35,17 @@ Interactive Swagger UI is served on `/docs`.
 Generated OpenAPI is served on `/openapi.json` and `/openapi.yaml`.
 When `API_PREFIX` is configured, these routes are served under the same prefix.
 
+### Supported scopes
+
+The registered deterministic guardrails `detect_secret`, `detect_pii`,
+`max_length`, and `prompt_injection` support both `request` and `response`.
+This includes the native scan routes and the LiteLLM route selected with
+`LITELLM_GUARDRAIL_NAME=prompt_injection`: pre-call request texts and post-call
+response texts return `BLOCKED` when injection patterns match, and `NONE` for
+clean texts. Unknown scopes remain invalid (HTTP `422`).
+The optional semantic prompt-injection library guardrail remains request-only
+and is not registered by the HTTP server.
+
 ### Route contracts
 
 All scan requests require at least one `texts` entry; `input_type` defaults to

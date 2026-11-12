@@ -142,3 +142,23 @@ func (f fakePromptInjectionDetector) DetectPromptInjection(context.Context, []st
 	}
 	return f.assessment, nil
 }
+
+func TestPromptInjectionGuardrailSupportsKnownScopesOnly(t *testing.T) {
+	g, err := guardrails.NewPromptInjectionGuardrail(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		scope domain.Scope
+		want  bool
+	}{
+		{domain.ScopeRequest, true},
+		{domain.ScopeResponse, true},
+		{"", false},
+		{"unknown", false},
+	} {
+		if got := g.Supports(tc.scope); got != tc.want {
+			t.Errorf("Supports(%q) = %v, want %v", tc.scope, got, tc.want)
+		}
+	}
+}

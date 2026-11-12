@@ -57,7 +57,7 @@ func TestLiteLLMHandlerUsesConfiguredGuardrail(t *testing.T) {
 	}
 }
 
-func TestLiteLLMHandlerRejectsUnsupportedScope(t *testing.T) {
+func TestLiteLLMHandlerRejectsUnknownScope(t *testing.T) {
 	t.Parallel()
 
 	handler, err := app.NewHandler(config.Config{
@@ -72,7 +72,7 @@ func TestLiteLLMHandlerRejectsUnsupportedScope(t *testing.T) {
 
 	requestBody := map[string]any{
 		"texts":      []string{"hello"},
-		"input_type": "response",
+		"input_type": "unknown",
 	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -83,8 +83,8 @@ func TestLiteLLMHandlerRejectsUnsupportedScope(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnprocessableEntity)
 	}
 }
 
