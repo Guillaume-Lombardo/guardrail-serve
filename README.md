@@ -35,11 +35,44 @@ Interactive Swagger UI is served on `/docs`.
 Generated OpenAPI is served on `/openapi.json` and `/openapi.yaml`.
 When `API_PREFIX` is configured, these routes are served under the same prefix.
 
-Payload guardrail limits are configured through `MAX_TEXT_ITEMS` and `MAX_TEXT_CHARS`. Non-positive or invalid values fall back to the documented defaults.
 
 Current request validation is text-first: each scan request must include at least one `texts` entry, and non-empty `images`, `tools`, `tool_calls`, `structured_messages`, and `request_data` fields are rejected until those inputs are supported explicitly.
 
 Each request returns an `X-Request-ID` header. If the client provides `X-Request-ID`, the service reuses it for request correlation.
+
+## Runtime configuration
+
+`MAX_TEXT_ITEMS` (default `20`) limits text entries. `MAX_TEXT_CHARS` (default
+`20000`) counts Unicode code points (runes) across all entries, including combining
+marks separately. Invalid or non-positive text limits use these defaults.
+
+Transport limits are independent of text limits:
+
+| Environment variable | Default | Meaning |
+| --- | --- | --- |
+| `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time to read request headers |
+| `HTTP_READ_TIMEOUT` | `15s` | Time to read the complete request, including its body |
+| `HTTP_WRITE_TIMEOUT` | `30s` | Response write deadline |
+| `HTTP_IDLE_TIMEOUT` | `60s` | Keep-alive idle deadline |
+| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | Graceful drain deadline after SIGTERM or SIGINT |
+| `HTTP_MAX_BODY_BYTES` | `1048576` | Maximum encoded request body size in bytes |
+| `GUARDRAIL_API_KEYS` | empty | Optional comma-separated API keys |
+
+Timeouts accept positive Go durations such as `500ms` or `30s`; invalid,
+non-positive or overflowing settings fail startup. The body limit must be a
+positive integer less than MaxInt64. Oversized requests return HTTP `413`,
+including bodies with unknown content length. Body read failures return `400`.
+On shutdown the server stops accepting connections, drains active requests, then
+closes remaining connections when the deadline expires.
+
+An unset or empty `GUARDRAIL_API_KEYS` preserves unauthenticated access. When set,
+all routes (including docs and OpenAPI) require either `Authorization: Bearer <key>`
+or `X-API-Key: <key>`. Only `GET <API_PREFIX>/health/` is exempt. Keys are trimmed
+when loaded; empty comma-separated entries and whitespace inside keys fail startup.
+Multiple credential headers, including using both header forms, are rejected with
+`401`. Keys are hashed and compared in constant time across the whole configured
+set, and never included in authentication errors or logs. Use TLS at the ingress
+and provide keys through the environment, never a committed configuration file.
 
 ## Logging
 

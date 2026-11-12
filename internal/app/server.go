@@ -19,14 +19,19 @@ func NewServer(cfg config.Config) (*http.Server, error) {
 }
 
 func NewServerWithLogger(cfg config.Config, logger *slog.Logger) (*http.Server, error) {
+	cfg.Runtime = cfg.Runtime.Defaults()
 	handler, err := NewHandlerWithLogger(cfg, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	return &http.Server{
-		Addr:    cfg.ListenAddr(),
-		Handler: handler,
+		Addr:              cfg.ListenAddr(),
+		ReadHeaderTimeout: cfg.Runtime.ReadHeaderTimeout,
+		ReadTimeout:       cfg.Runtime.ReadTimeout,
+		WriteTimeout:      cfg.Runtime.WriteTimeout,
+		IdleTimeout:       cfg.Runtime.IdleTimeout,
+		Handler:           handler,
 	}, nil
 }
 
@@ -36,6 +41,10 @@ func NewHandler(cfg config.Config) (http.Handler, error) {
 }
 
 func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler, error) {
+	cfg.Runtime = cfg.Runtime.Defaults()
+	if err := cfg.Runtime.Validate(); err != nil {
+		return nil, err
+	}
 	secretPatterns, err := resources.LoadPatterns(cfg.GuardrailsConfigDir, "detect_secret_contextual_patterns.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("load secret patterns: %w", err)
@@ -68,5 +77,5 @@ func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler,
 
 	mux := http.NewServeMux()
 	apiHandler.Register(mux)
-	return apiHandler.WithObservability(mux), nil
+	return runtimeHandler(cfg, apiHandler.WithObservability(mux)), nil
 }
