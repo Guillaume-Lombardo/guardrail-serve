@@ -3,6 +3,7 @@ package guardrails
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/g1lom/guardrail-serve/internal/domain"
 )
@@ -40,7 +41,7 @@ func (g *MaxLengthGuardrail) Apply(_ context.Context, payload domain.Payload) (d
 
 	total := 0
 	for _, text := range payload.Texts {
-		total += len(text)
+		total += utf8.RuneCountInString(text)
 	}
 	if total > g.maxChars {
 		reason := fmt.Sprintf("Payload too large: %d > %d characters.", total, g.maxChars)
