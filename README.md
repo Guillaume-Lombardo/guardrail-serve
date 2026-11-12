@@ -36,7 +36,39 @@ Generated OpenAPI is served on `/openapi.json` and `/openapi.yaml`.
 When `API_PREFIX` is configured, these routes are served under the same prefix.
 
 
-Current request validation is text-first: each scan request must include at least one `texts` entry, and non-empty `images`, `tools`, `tool_calls`, `structured_messages`, and `request_data` fields are rejected until those inputs are supported explicitly.
+### Route contracts
+
+All scan requests require at least one `texts` entry; `input_type` defaults to
+`request` and accepts `request` or `response`. `request_data` accepts arbitrary
+metadata, including LiteLLM `user_api_key_*` values, without evaluating it.
+
+`/scan/*` uses a strict schema: unknown fields and non-empty `images`, `tools`,
+`tool_calls`, and `structured_messages` are rejected. Responses retain
+`decision`, `texts`, `metadata`, and optional `reason`.
+
+`/beta/litellm_basic_guardrail_api` implements the
+[LiteLLM Generic Guardrail API](https://docs.litellm.ai/docs/adding_provider/generic_guardrail_api).
+It accepts `litellm_call_id`, `litellm_trace_id`, `litellm_version`,
+`request_headers`, and `additional_provider_specific_params`, and ignores unknown
+fields. Metadata and forwarded headers are opaque: they do not select policies,
+authenticate callers, or change guardrail settings.
+
+The LiteLLM route accepts `images`, `tools`, `tool_calls`, and
+`structured_messages` without evaluating or rewriting them. Only extracted
+`texts` are scanned; callers must not treat this endpoint as image, tool, or
+structured-message protection. Requests without text items remain invalid.
+
+LiteLLM responses use `action` (`NONE`, `BLOCKED`, or `GUARDRAIL_INTERVENED`),
+`blocked_reason` when blocked, and `texts` in the same order and count as input,
+including unchanged entries when another entry is redacted. For example:
+
+```json
+{"action":"GUARDRAIL_INTERVENED","texts":["hello","password=[REDACTED]"]}
+```
+
+The LiteLLM response does not expose the internal scan `decision`/`metadata`
+fields. A guardrail returning misaligned text items produces HTTP `502` rather
+than an invalid rewrite.
 
 Each request returns an `X-Request-ID` header. If the client provides `X-Request-ID`, the service reuses it for request correlation.
 

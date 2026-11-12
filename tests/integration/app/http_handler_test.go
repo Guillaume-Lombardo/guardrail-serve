@@ -52,7 +52,7 @@ func TestLiteLLMHandlerUsesConfiguredGuardrail(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if got, want := response["decision"], "GUARDRAIL_INTERVENED"; got != want {
+	if got, want := response["action"], "GUARDRAIL_INTERVENED"; got != want {
 		t.Fatalf("decision = %v, want %v", got, want)
 	}
 }
