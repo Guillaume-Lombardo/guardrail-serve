@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	Runtime              Runtime
 	APIPrefix            string
 	APIPort              string
 	APIVersion           string
@@ -23,6 +24,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
+		Runtime:              loadRuntime(),
 		APIPrefix:            normalizePrefix(getEnv("API_PREFIX", "")),
 		APIPort:              getEnv("API_PORT", "8000"),
 		APIVersion:           getEnv("API_VERSION", "0.1.0"),
