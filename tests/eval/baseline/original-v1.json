@@ -1,0 +1,716 @@
+{
+  "corpus": "guardrail-serve-original-v1",
+  "groups": {
+    "detect_pii": {
+      "all": {
+        "counts": {
+          "fn": 0,
+          "fp": 4,
+          "tn": 65,
+          "tp": 13
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.057971014492753624
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.7647058823529411
+          },
+          "recall": {
+            "defined": true,
+            "value": 1
+          }
+        }
+      },
+      "en": {
+        "counts": {
+          "fn": 0,
+          "fp": 2,
+          "tn": 34,
+          "tp": 8
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.05555555555555555
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.8
+          },
+          "recall": {
+            "defined": true,
+            "value": 1
+          }
+        }
+      },
+      "fr": {
+        "counts": {
+          "fn": 0,
+          "fp": 2,
+          "tn": 31,
+          "tp": 5
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.06060606060606061
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.7142857142857143
+          },
+          "recall": {
+            "defined": true,
+            "value": 1
+          }
+        }
+      }
+    },
+    "detect_secret": {
+      "all": {
+        "counts": {
+          "fn": 2,
+          "fp": 5,
+          "tn": 61,
+          "tp": 15
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.07575757575757576
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.75
+          },
+          "recall": {
+            "defined": true,
+            "value": 0.8823529411764706
+          }
+        }
+      },
+      "en": {
+        "counts": {
+          "fn": 1,
+          "fp": 3,
+          "tn": 32,
+          "tp": 8
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.08571428571428572
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.7272727272727273
+          },
+          "recall": {
+            "defined": true,
+            "value": 0.8888888888888888
+          }
+        }
+      },
+      "fr": {
+        "counts": {
+          "fn": 1,
+          "fp": 2,
+          "tn": 29,
+          "tp": 7
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.06451612903225806
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.7777777777777778
+          },
+          "recall": {
+            "defined": true,
+            "value": 0.875
+          }
+        }
+      }
+    },
+    "prompt_injection": {
+      "all": {
+        "counts": {
+          "fn": 5,
+          "fp": 1,
+          "tn": 69,
+          "tp": 8
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.014285714285714285
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.8888888888888888
+          },
+          "recall": {
+            "defined": true,
+            "value": 0.6153846153846154
+          }
+        }
+      },
+      "en": {
+        "counts": {
+          "fn": 2,
+          "fp": 1,
+          "tn": 36,
+          "tp": 5
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.02702702702702703
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.8333333333333334
+          },
+          "recall": {
+            "defined": true,
+            "value": 0.7142857142857143
+          }
+        }
+      },
+      "fr": {
+        "counts": {
+          "fn": 3,
+          "fp": 0,
+          "tn": 33,
+          "tp": 3
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0
+          },
+          "precision": {
+            "defined": true,
+            "value": 1
+          },
+          "recall": {
+            "defined": true,
+            "value": 0.5
+          }
+        }
+      }
+    }
+  },
+  "known_failures": [
+    {
+      "case_id": "inj-en-006",
+      "detector": "prompt_injection",
+      "kind": "fn"
+    },
+    {
+      "case_id": "inj-en-007",
+      "detector": "prompt_injection",
+      "kind": "fn"
+    },
+    {
+      "case_id": "inj-en-106",
+      "detector": "prompt_injection",
+      "kind": "fp"
+    },
+    {
+      "case_id": "inj-fr-002",
+      "detector": "prompt_injection",
+      "kind": "fn"
+    },
+    {
+      "case_id": "inj-fr-003",
+      "detector": "prompt_injection",
+      "kind": "fn"
+    },
+    {
+      "case_id": "inj-fr-005",
+      "detector": "prompt_injection",
+      "kind": "fn"
+    },
+    {
+      "case_id": "pii-en-107",
+      "detector": "detect_pii",
+      "kind": "fp"
+    },
+    {
+      "case_id": "pii-fr-106",
+      "detector": "detect_pii",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-en-006",
+      "detector": "detect_pii",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-en-008",
+      "detector": "detect_secret",
+      "kind": "fn"
+    },
+    {
+      "case_id": "secret-en-105",
+      "detector": "detect_secret",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-en-106",
+      "detector": "detect_secret",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-en-107",
+      "detector": "detect_secret",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-fr-005",
+      "detector": "detect_pii",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-fr-007",
+      "detector": "detect_secret",
+      "kind": "fn"
+    },
+    {
+      "case_id": "secret-fr-105",
+      "detector": "detect_secret",
+      "kind": "fp"
+    },
+    {
+      "case_id": "secret-fr-106",
+      "detector": "detect_secret",
+      "kind": "fp"
+    }
+  ],
+  "mode": "annotate",
+  "outcomes": {
+    "inj-en-001": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-en-002": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-en-003": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-en-004": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-en-005": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-en-006": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-007": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-101": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-102": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-103": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-104": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-105": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-en-106": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-fr-001": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-fr-002": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-003": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-004": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-fr-005": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-006": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": true
+    },
+    "inj-fr-101": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-102": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-103": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-104": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-105": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "inj-fr-106": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-001": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-002": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-003": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-004": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-005": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-006": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-101": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-102": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-103": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-104": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-105": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-106": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-en-107": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-001": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-002": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-003": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-004": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-005": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-006": {
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-101": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-102": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-103": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-104": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-105": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "pii-fr-106": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "resp-en-001": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "resp-en-002": {
+      "detect_pii": true,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "resp-en-003": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "resp-fr-001": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "resp-fr-002": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-en-001": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-002": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-003": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-004": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-005": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-006": {
+      "detect_pii": true,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-007": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-008": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-en-101": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-en-102": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-en-103": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-en-104": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-en-105": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-106": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-en-107": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-001": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-002": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-003": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-004": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-005": {
+      "detect_pii": true,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-006": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-007": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-fr-101": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-fr-102": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-fr-103": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-fr-104": {
+      "detect_pii": false,
+      "detect_secret": false,
+      "prompt_injection": false
+    },
+    "secret-fr-105": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    },
+    "secret-fr-106": {
+      "detect_pii": false,
+      "detect_secret": true,
+      "prompt_injection": false
+    }
+  },
+  "policy": "audit",
+  "sha256": "adb9f8c6918337e64e5c3226ccf34ac293385fcbc6daf565a23490964f31f0d9",
+  "version": 1
+}
