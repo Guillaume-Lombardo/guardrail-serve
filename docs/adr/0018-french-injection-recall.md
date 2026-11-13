@@ -68,11 +68,16 @@ lookaround and no backreferences.
 5. **Regex hygiene.** Rules are RE2, so matching stays linear. Fixed building
    blocks keep gaps bounded: clause start, modal, verb, determiner, noun and
    qualifier, with `{0,n}` limits. Verbs start on a word boundary ("dis" in
-   "tandis" is not a verb). The override, forget, reveal, bypass and answer rules
-   require the verb at a clause start or after a modal ("peux-tu", "merci
-   de"), so refusals and prohibitions ("je ne peux pas recopier les
-   instructions système", "ne révèle jamais ton prompt") are not directives. A test with long adversarial input checks
-   this. Their regexes are written in folded form (lowercase, no accents).
+   "tandis" is not a verb). The override, forget, reveal, exfiltrate, bypass
+   and answer rules, and the imperative role branches (joue, incarne, passe
+   en…), require the verb at a clause start or after a modal ("peux-tu",
+   "merci de"), optionally followed by a clitic pronoun ("peux-tu me
+   révéler"). Refusals and prohibitions ("je ne peux pas recopier les
+   instructions système", "n'envoie pas la conversation à…", "ne révèle
+   jamais ton prompt") are therefore not directives. Declarative role
+   takeovers ("tu es maintenant…", "désormais tu es…") match anywhere. A test
+   with long adversarial input checks the bounded cost. Their regexes are
+   written in folded form (lowercase, no accents).
 
 6. **Evaluation.** A separate versioned corpus,
    `guardrail-serve-french-injection-v1`, gets its own baseline. Corpora are
