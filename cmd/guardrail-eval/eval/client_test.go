@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -278,5 +279,16 @@ func TestMalformedHTTPResponseDoesNotEchoRemoteData(t *testing.T) {
 	reqErr := requestError(t, err)
 	if reqErr.Kind != eval.KindTransport || strings.Contains(reqErr.Error(), key) {
 		t.Fatalf("err = %v", reqErr)
+	}
+}
+
+func TestTLSVerificationFailureIsNamed(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	client := newClient(t, eval.ClientConfig{BaseURL: server.URL})
+	_, err := client.Scan(context.Background(), "/scan/secrets", eval.InputRequest, "x")
+	reqErr := requestError(t, err)
+	if reqErr.Kind != eval.KindTransport || !strings.Contains(reqErr.Message, "certificate") {
+		t.Fatalf("err = %+v", reqErr)
 	}
 }

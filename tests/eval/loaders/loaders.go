@@ -312,6 +312,13 @@ func CheckOutputPath(path string, allowAny bool) error {
 	if allowAny {
 		return nil
 	}
+	// ".." is resolved lexically by Abs but by the kernel when writing, so
+	// ".agent-tmp/link/../x" could reach a different file than the one checked.
+	for _, part := range strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == filepath.Separator }) {
+		if part == ".." {
+			return errors.New("--output must not contain '..' components")
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err

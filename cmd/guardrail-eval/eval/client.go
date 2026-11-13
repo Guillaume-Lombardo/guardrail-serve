@@ -3,6 +3,7 @@ package eval
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,8 +326,15 @@ func (c *Client) transportError(ctx context.Context, err error) *RequestError {
 	}
 	// Only network-level errors are quoted: other errors (for example a
 	// malformed HTTP response) can embed bytes sent by the remote server.
+	var certErr *tls.CertificateVerificationError
+	var recordErr tls.RecordHeaderError
 	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	switch {
+	case errors.As(err, &certErr):
+		return &RequestError{Kind: KindTransport, Message: "TLS certificate verification failed"}
+	case errors.As(err, &recordErr):
+		return &RequestError{Kind: KindTransport, Message: "the server did not speak TLS"}
+	case errors.As(err, &opErr):
 		return &RequestError{Kind: KindTransport, Message: opErr.Error()}
 	}
 	return &RequestError{Kind: KindTransport, Message: "the server did not return a valid HTTP response"}

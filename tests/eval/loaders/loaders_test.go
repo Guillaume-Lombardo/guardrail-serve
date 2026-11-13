@@ -310,6 +310,9 @@ func TestCheckOutputPath(t *testing.T) {
 
 func TestCheckOutputPathRefusesSymlinkEscapes(t *testing.T) {
 	root := t.TempDir()
+	if strings.Contains(root, loaders.ScratchDir) {
+		t.Skip("TMPDIR is itself inside a scratch directory")
+	}
 	outside := filepath.Join(root, "outside")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatal(err)
@@ -332,6 +335,9 @@ func TestCheckOutputPathRefusesSymlinkEscapes(t *testing.T) {
 		if err := loaders.CheckOutputPath(path, false); err == nil {
 			t.Errorf("%s accepted", path)
 		}
+	}
+	if err := loaders.CheckOutputPath(filepath.Join(scratchDir, "link", "..", "x.jsonl"), false); err == nil {
+		t.Error("path with .. components accepted")
 	}
 	if err := loaders.CheckOutputPath(filepath.Join(scratchDir, "ok", "x.jsonl"), false); err != nil {
 		t.Errorf("plain path rejected: %v", err)
