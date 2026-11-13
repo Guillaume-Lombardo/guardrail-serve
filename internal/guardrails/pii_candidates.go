@@ -31,24 +31,23 @@ func identifierBoundary(text string, start, end int) bool {
 
 // piiCandidateEnd confirms normalized candidates before mapping to original text.
 func piiCandidateEnd(rule compiledRule, text string, start, end int) int {
-	if (rule.validator != "" || rule.kind == "PHONE_NUMBER" || rule.kind == "IP_ADDRESS") && !identifierBoundary(text, start, end) {
-		return start
-	}
 	if rule.validator == validators.KindPaymentCard && frenchIdentifierPrefix.MatchString(text[:start]) {
 		return start
 	}
-	if rule.validator == validators.KindIBAN {
-		// A grouped IBAN regex can consume following prose. Only shorten at a
-		// separator; never accept a valid prefix of a longer identifier.
+	if rule.validator == validators.KindIBAN || rule.validator == validators.KindPaymentCard {
+		// Greedy grouped candidates may consume following prose or a CVV.
+		// Reconsider only separator boundaries, never a compact number prefix.
 		for candidateEnd := end; candidateEnd > start; candidateEnd-- {
 			if candidateEnd != end && text[candidateEnd] != ' ' && text[candidateEnd] != '-' {
 				continue
 			}
-			candidate := text[start:candidateEnd]
-			if validators.ValidateIBAN(candidate).Valid {
+			if identifierBoundary(text, start, candidateEnd) && validators.Validate(rule.validator, text[start:candidateEnd]).Valid {
 				return candidateEnd
 			}
 		}
+		return start
+	}
+	if (rule.validator != "" || rule.kind == "PHONE_NUMBER" || rule.kind == "IP_ADDRESS") && !identifierBoundary(text, start, end) {
 		return start
 	}
 	if rule.validator != "" && !validators.Validate(rule.validator, text[start:end]).Valid {
