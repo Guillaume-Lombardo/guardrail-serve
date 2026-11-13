@@ -5,14 +5,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/g1lom/guardrail-serve/internal/app"
+	"github.com/g1lom/guardrail-serve/internal/config"
 )
 
 // testdata/compat_golden.json was recorded from the pre-policy-engine
 // implementation (main 6eeac11). /scan/* and the default LiteLLM policy must
-// keep returning byte-for-byte equivalent decisions, masks, metadata and reasons.
+// retain these results when the explicit legacy secrets override is used.
 func TestScanAndLiteLLMMatchPrePolicyEngineGolden(t *testing.T) {
 	raw, err := os.ReadFile("testdata/compat_golden.json")
 	if err != nil {
@@ -30,7 +34,18 @@ func TestScanAndLiteLLMMatchPrePolicyEngineGolden(t *testing.T) {
 	if len(cases) == 0 {
 		t.Fatal("empty golden corpus")
 	}
-	handler := newTestHandler(t)
+	dir := t.TempDir()
+	legacy, err := os.ReadFile("testdata/legacy_secret_patterns.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "detect_secret_contextual_patterns.yaml"), legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := app.NewHandler(config.Config{GuardrailsConfigDir: dir, SecretMask: "[REDACTED]", LiteLLMDefaultPolicy: "detect_secret", MaxTextItems: 20, MaxTextChars: 20000})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for index, tc := range cases {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, tc.Route, strings.NewReader(string(tc.Body))))

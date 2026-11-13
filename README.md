@@ -113,12 +113,13 @@ policies:
   returns `GUARDRAIL_INTERVENED`; `annotate` only reports findings.
 - `detect` mode never changes texts and always returns `decision: NONE`;
   `policy_decision`, `reason` and findings show what `enforce` would do.
-- Every detector scans the original text. Overlapping masked spans merge into
+- Every detector reports spans in the original text (native deterministic
+  detectors match a normalized view). Overlapping masked spans merge into
   one replacement using the mask of the earliest chain step; touching spans
   merge only when they render the same mask.
 - `{TYPE}` in a mask expands to the finding type, such as `EMAIL`,
-  `PHONE_NUMBER`, `IBAN`, `IP_ADDRESS`, `CREDIT_CARD`, `PASSWORD`, `API_KEY`
-  or `PROMPT_INJECTION`. Pattern files set it per rule with `type:`; rules
+  `PHONE_NUMBER`, `IBAN`, `IP_ADDRESS`, `CREDIT_CARD`, `PASSWORD`, `API_KEY`,
+  `SECRET`, `HIGH_ENTROPY_STRING` or `PROMPT_INJECTION`. Pattern files set it per rule with `type:`; rules
   without it use `SECRET`, `PII` or `PROMPT_INJECTION`. `detect_secret` and
   `detect_pii` rules must contain a `(?P<secret>...)` group.
 - Payload limits run first in every mode and block oversized payloads.
@@ -304,7 +305,7 @@ pre-commit run --all-files
 
 ### Normalized deterministic detection
 
-PII and prompt-injection rules scan an NFKC view with zero-width and bidi
+Native secret detection, PII and prompt-injection rules scan an NFKC view with zero-width and bidi
 formatting controls removed. English and French hostile instruction overrides,
 system-prompt disclosure and hostile tool use are covered by deterministic
 patterns; ordinary requests such as “list the tools I need to build a shed”
@@ -330,7 +331,7 @@ IPv4 literals remain detectable, except immediately after `version`, `release`,
 `ver`, or `v` with optional spacing and `:`, `=`, `-` separators. Card matches
 end at the last digit and preserve following spaces.
 
-PII/injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
+Native secret, PII and injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
 error, before returning any detections. JSON decoding replaces malformed UTF-8
 and unpaired UTF-16 surrogates with U+FFFD; these decoded texts therefore also
 fail closed through the existing detector-error HTTP 502 response, with the stable
@@ -339,7 +340,7 @@ JSON detail
 ([ADR 0007](docs/adr/0007-policy-engine-and-findings.md)). Literal U+FFFD is
 deliberately rejected too: after decoding,
 it cannot be distinguished from damaged input. Offsets always refer to valid
-original UTF-8, never to a repaired string. Policies that do not run either
+original UTF-8, never to a repaired string. Policies that do not run a normalized
 detector retain their existing behavior. No admission/body/rune limit changes.
 See [ADR 0013](docs/adr/0013-normalized-detector-integration.md).
 ## Prometheus metrics
@@ -495,3 +496,44 @@ validated custom implementation; no Python runtime, CGO, model or provider is
 required by the Go service or its fixed-fixture/httptest suites. The rune chunk
 heuristic does not guarantee a checkpoint token limit; calibrate the sidecar and
 threshold against your traffic before deployment. See [ADR 0016](docs/adr/0016-semantic-policy-adapter.md).
+
+### Native secret detection
+
+Without a `detect_secret_contextual_patterns.yaml` override, `detect_secret`
+uses the native [secret scanner](internal/secrets/README.md): 217 embedded,
+pinned MIT gitleaks rules, keyword assignments and Shannon entropy (base64
+4.5, hex 3.0). Generic length/base64/hex regexes are retired. Bare git SHAs,
+UUIDs, likely identifiers, templates and sequences are filtered; strong secret
+assignment context still masks a hash-shaped password. No network verification,
+Python process or scanner library is required. See [NOTICE](NOTICE).
+
+Native secrets use the same normalization as PII/injection: invisible controls
+are stripped and NFKC is applied for detection, then spans are mapped to original
+bytes and complete graphemes before the engine emits original rune offsets.
+Masking preserves surrounding original text. Rule names now use `gitleaks:`,
+`keyword:` and `entropy:` prefixes; types are `SECRET` or `HIGH_ENTROPY_STRING`
+(the latter includes the entropy score). Typed masks follow these types.
+
+An explicit YAML secrets override in `GUARDRAILS_CONFIG_DIR` **replaces the
+native scanner entirely**, retaining legacy regex matching on original text,
+named `secret` captures, rule names and types. An empty override disables secret
+detection. A missing file enables native defaults even when other overrides
+exist. Remove the secrets override to migrate; copied older defaults retain
+older behavior until removed. No secrets YAML is shipped in the default-resource directory, so copying
+that directory to customize other resources keeps native detection enabled.
+No environment variables changed.
+
+Detection is heuristic, not exhaustive: plain unquoted word passwords,
+multi-line YAML values, encoded secrets and some prose labels can be missed;
+normalization can broaden matches. Provider allowlists and entropy filters can
+produce false negatives; entropy can produce false positives. Limits and the
+representative synthetic corpus are documented in the package README. Bound
+request sizes and execution deadlines remain essential because all active
+provider regexes scan the text. See [ADR 0017](docs/adr/0017-secret-detector-integration.md).
+
+For compatibility with the fixed evaluation contract, the adapter also retains
+`compat:aws_access_key_id` (`AKIA` followed by 16 uppercase letters/digits,
+word boundaries), including documentation examples excluded by upstream
+allowlists. This conservative rule may mask public AWS examples; other native
+allowlists remain unchanged. Legacy overrides retain their historical types
+and masks, which differ from the native defaults above.
