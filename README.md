@@ -249,8 +249,8 @@ curl http://127.0.0.1:8000/health/
   through the orchestrator's secret mechanism, never bake them into the image.
 - **Health**: `GET <API_PREFIX>/health/` returns `200 {"status":"ok"}` and is exempt from API-key
   authentication. The image has no `HEALTHCHECK` instruction because it contains no shell or curl:
-  configure the probe in the orchestrator (Compose `healthcheck` from another container, Kubernetes
-  `httpGet`, load balancer check).
+  configure the probe in the orchestrator (Kubernetes `httpGet`, load balancer check, or an HTTP
+  probe from a sidecar or auxiliary container).
 - **Signals**: the binary is PID 1 through an exec-form `ENTRYPOINT` and handles `SIGTERM` and
   `SIGINT` itself: it stops accepting connections and drains requests for up to
   `HTTP_SHUTDOWN_TIMEOUT` (default `10s`). Set the orchestrator's stop grace period above that value

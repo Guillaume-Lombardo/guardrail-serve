@@ -29,9 +29,11 @@ that does not depend on mutable image tags.
   `SIGTERM` directly. There is no `HEALTHCHECK` because the image has no probe binary; adding one
   would require code or a non-distroless base. Operators probe `GET /health/` from the
   orchestrator. A dedicated probe subcommand is a possible follow-up in the runtime lot.
-- **Minimal context**. `.dockerignore` keeps only `go.mod`, `go.sum`, `cmd/` and `internal/`
-  (plus `LICENSE`) in the build context and excludes `.git`, `.agent-tmp`, `archive/`, `.env*`
-  and key material. Embedded resources live under `internal/`, so they are preserved.
+- **Minimal context**. `.dockerignore` excludes `.git`, `.agent-tmp`, `archive/`, `.env*`, key
+  material, tests, docs, skills, workflows and Markdown files, so the context is in practice
+  `go.mod`, `go.sum`, `cmd/`, `internal/` and `LICENSE`. Embedded resources live under
+  `internal/`, so they are preserved. The `Dockerfile` copies only `go.mod`, `go.sum`, `cmd/`
+  and `internal/` into the build stage.
 - **CI**. `.github/workflows/container.yml` is disjoint from `ci.yml` and the release workflow.
   It runs with `contents: read`, builds the image with `docker build` and never pushes or logs in
   to a registry. It is not a replacement for any existing check.
