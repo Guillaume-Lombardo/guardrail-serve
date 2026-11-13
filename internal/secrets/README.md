@@ -18,8 +18,8 @@ findings, err := scanner.Scan(ctx, text)
 - `New(Config) (*Scanner, error)` validates the configuration. A `Scanner`
   is immutable and safe for concurrent use.
 - `Scan(ctx, text)` returns findings sorted by start, end, source and rule.
-  Its only error is the context error (`ctx.Err()`), checked between rules
-  and sources.
+  Its only error is the context error (`ctx.Err()`), checked between
+  sources, between gitleaks rules and every 256 matches of a rule.
 - `Rules()` lists the rule names a scanner can report, sorted.
 - `ExcludedGitleaksRules()` lists the vendored gitleaks rules that never
   apply to free text, with the reason.
@@ -83,7 +83,10 @@ Semantics reproduced from gitleaks `detect/detect.go`:
   `secret` (default), `match` or `line`, case-insensitive `stopwords` on the
   secret;
 - generic-rule precedence: a `generic-api-key` finding is dropped when a
-  non-generic finding on the same line contains its secret.
+  non-generic finding contains it (upstream compares secret strings on the
+  same line; span containment is used here so the filter stays
+  `O(n log n)`, and a generic finding equal to a provider secret found at
+  another position of the line is kept, which only masks more).
 
 The reported span is the secret, not the whole match.
 
@@ -97,7 +100,10 @@ Deliberate differences:
   (`freemius-secret-key`, `hashicorp-tf-password`, `kubernetes-secret-yaml`,
   `nuget-config-password`, `pkcs12-file` in v8.30.1). The active set has 217
   rules.
-- `regexTarget = "line"` uses the lines spanned by the trimmed match.
+- `regexTarget = "line"` uses the lines spanned by the trimmed match; its
+  result is cached per line and allowlist during a scan. An `AND` allowlist
+  with a path or commit criterion is skipped without evaluating its regexes,
+  since it can never hold.
 - Entropy counts Unicode code points (gitleaks iterates runes too; the result
   only differs for invalid UTF-8).
 - Decoding passes (base64/hex/percent decoding before rescanning) are not
@@ -130,14 +136,20 @@ The key is split into words (separators, then camelCase) and classified into a
 group: `password` (password, passwd, pwd, passphrase, `pass` after a
 qualifier as in `db_pass`, mdp, mot de passe, contraseña…), `secret`,
 `api_key`, `token`, `credential`, `authorization`.
-Keywords match the end of a separator word (`dbpass`, `appsecret`), with
-qualifiers before them. Keys that describe a secret instead of holding it are
+Keywords match the end of a separator word (`dbpass`, `appsecret`,
+`adminpassword`), with qualifiers before them, then camelCase sub-words, so
+a keyword followed by another word is found too (`passwordProd`,
+`secretValue`, `apiKeyValue`). Keys that describe a secret instead of holding it are
 not secret keys: a descriptor after the keyword (`password_length`,
 `token_url`, `secret_name`, `passwordHint`), a negating prefix (`public_key`,
-`csrf_token`, `nextPageToken`, `max_tokens`) or an identifier suffix
+`csrf_token`, `nextPageToken`, `max_tokens`; a word prefix negates only when
+it is made entirely of negating prefixes, so `adminPassword` is not negated
+by "min") or an identifier suffix
 (`api_key_id`, `client_id`). `Authorization` values skip the scheme (`Basic`,
 `Token`, `Bearer`…). A standalone `Bearer <credential>` of at least 16
-characters is also reported as `keyword:bearer`.
+characters is also reported as `keyword:bearer`, and the password of URL
+user information (`scheme://user:password@host`) as
+`keyword:url_credential`, with the quoted value rules below.
 
 Value rules (deterministic, in this order):
 
@@ -145,7 +157,9 @@ Value rules (deterministic, in this order):
 2. placeholders are rejected: schema words and stopwords (`required`,
    `null`, `redacted`, `password`…), a single repeated character
    (`********`), templates (`{x}`, `<x>`, `[x]`, `${x}`, `{{ x }}`, `%x%`,
-   `%(x)s`), `$VAR`, and letter-only values containing `your`, `here`,
+   `%(x)s`, where `x` is letters, `_`, `.`, `-` and spaces), shell variables
+   (`$DB_PASS`, `$db_pass`: one letter case, no digits, as in the gitleaks
+   global allowlist), and letter-only values containing `your`, `here`,
    `example`, `placeholder`…;
 3. at least one letter or digit; digit-only values only for passwords (PINs),
    not for `token: 4096`;
@@ -191,8 +205,18 @@ git SHA is still reported when it is assigned to a secret key.
 - Unquoted plain-word passwords (`password: sunshine`) and `--password value`
   without an operator are not reported (prose false positives would
   dominate).
-- Zero-width characters and homoglyphs inside keys are left to text
-  normalization upstream of this package.
+- Zero-width characters and homoglyphs inside keys or operators (`∶` U+2236
+  instead of `:`) are left to text normalization upstream of this package
+  (see ADR 0008).
+- A YAML value on the line after its key (`password:` then an indented
+  value) is not an assignment.
+- A template marker around a letter-only body (`<Tr0ub4dor>` is reported,
+  `<hunter>` is not) and a shell variable shape (`$db_pass`) are treated as
+  placeholders.
+- Cost: scanning is linear in the text length, but every gitleaks rule
+  scans the whole text: a dense adversarial text costs a few seconds of CPU
+  per MiB. Callers must bound the text size and pass a context with a
+  deadline.
 - A secret inside a long base64 run is diluted by the surrounding characters
   (one run, one entropy).
 - No decoding passes: a base64-encoded provider token is reported only by

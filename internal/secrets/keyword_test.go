@@ -55,6 +55,10 @@ func TestContextualSecretVariants(t *testing.T) {
 		{"access_token: %s", "keyword:token"},
 		{"credentials: %s", "keyword:credential"},
 		{"Authorization: Basic %s", "keyword:authorization"},
+		{`{\"password\":\"%s\"}`, "keyword:password"},
+		{`"{\"db\": {\"password\": \"%s\"}}"`, "keyword:password"},
+		{"adminPassword: %s", "keyword:password"},
+		{"passwordProd=%s", "keyword:password"},
 		{`"Authorization": "Token %s"`, "keyword:authorization"},
 	}
 	for _, tc := range cases {
@@ -152,6 +156,17 @@ func TestClassifyKey(t *testing.T) {
 		{"nextPageToken", "", false},
 		{"apiKeyId", "", true},
 		{"passwordHint", "", false},
+		{"adminPassword", groupPassword, false},
+		{"adminpassword", groupPassword, false},
+		{"adminToken", groupToken, false},
+		{"homepageToken", groupToken, false},
+		{"nextpagetoken", "", false},
+		{"maxTotalTokens", "", false},
+		{"passwordProd", groupPassword, false},
+		{"secretValue", groupSecret, false},
+		{"apiKeyValue", groupAPIKey, false},
+		{"accessTokenExpiry", "", false},
+		{"secretArn", "", false},
 	}
 	for _, tc := range cases {
 		group, idLike := classifyKey(tc.key)
@@ -190,6 +205,11 @@ func TestKeywordValueFilters(t *testing.T) {
 		{"/etc/app/secret", false, groupSecret, false},
 		{"https://vault/x", false, groupSecret, false},
 		{"!!!!!!!", true, groupPassword, false},
+		{"$ecret123", true, groupPassword, true},
+		{"<Tr0ub4dor&3x>", true, groupPassword, true},
+		{"%Tr0ub4dor&3x%", true, groupPassword, true},
+		{"<your password>", true, groupPassword, false},
+		{"pass", true, groupPassword, false},
 		{"Zx9!kQ2#mR", false, groupPassword, true},
 	}
 	for _, tc := range cases {
@@ -236,6 +256,33 @@ func TestQuotedValuesHonourEscapes(t *testing.T) {
 		start := strings.Index(tc.text, tc.value)
 		if findings := scan(t, scanner, tc.text); len(findings) != 1 || !hasFinding(findings, "keyword:password", start, start+len(tc.value)) {
 			t.Errorf("%q: want one finding on the whole value, got %s", tc.text, describe(findings))
+		}
+	}
+}
+
+func TestURLCredentials(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	const password = "Zx9!kQ2mR7" // '#' would end the URL authority
+	for _, format := range []string{
+		"https://admin:%s@db.internal/x",
+		"postgres://app:%s@10.0.0.1:5432/db",
+		"connect to redis://:%s@cache:6379",
+	} {
+		text := strings.Replace(format, "%s", password, 1)
+		start := strings.Index(text, password)
+		if findings := scan(t, scanner, text); !hasFinding(findings, "keyword:url_credential", start, start+len(password)) {
+			t.Errorf("%q: want keyword:url_credential on the password, got %s", format, describe(findings))
+		}
+	}
+	for _, text := range []string{
+		"https://user:pass@example.com/",
+		"https://user:${DB_PASSWORD}@example.com/",
+		"https://user:****@example.com/",
+		"https://example.com:8443/path",
+		"mailto:someone@example.com",
+	} {
+		if findings := scan(t, scanner, text); len(findings) != 0 {
+			t.Errorf("%q: unexpected %s", text, describe(findings))
 		}
 	}
 }

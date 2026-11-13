@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -44,7 +45,6 @@ type gitleaksMatch struct {
 	start, end  int // secret span, bytes
 	match       string
 	secret      string
-	line        int
 	ruleGeneric bool
 }
 
@@ -58,6 +58,7 @@ func scanGitleaks(ctx context.Context, view *textView, rules []gitleaksRule, glo
 	text := view.text
 	lower := view.lowered()
 	var matches []gitleaksMatch
+	lines := lineAllowCache{}
 	for _, rule := range rules {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -65,7 +66,12 @@ func scanGitleaks(ctx context.Context, view *textView, rules []gitleaksRule, glo
 		if len(rule.keywords) > 0 && !containsAny(lower, rule.keywords) {
 			continue
 		}
-		for _, index := range rule.regex.FindAllStringIndex(text, -1) {
+		for n, index := range rule.regex.FindAllStringIndex(text, -1) {
+			if n%ctxCheckInterval == ctxCheckInterval-1 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			start, end := index[0], index[1]
 			for start < end && text[start] == '\n' {
 				start++
@@ -76,7 +82,7 @@ func scanGitleaks(ctx context.Context, view *textView, rules []gitleaksRule, glo
 			if start == end {
 				continue
 			}
-			found, ok := evaluateGitleaksMatch(view, rule, global, start, end)
+			found, ok := evaluateGitleaksMatch(view, rule, global, lines, start, end)
 			if ok {
 				matches = append(matches, found)
 			}
@@ -96,7 +102,20 @@ func scanGitleaks(ctx context.Context, view *textView, rules []gitleaksRule, glo
 	return findings, nil
 }
 
-func evaluateGitleaksMatch(view *textView, rule gitleaksRule, global []gitleaksAllowlist, start, end int) (gitleaksMatch, bool) {
+// ctxCheckInterval is how many matches of one rule are evaluated between
+// two context checks.
+const ctxCheckInterval = 256
+
+// lineAllowCache memoizes the line-target regexes of an allowlist per line:
+// many matches on one long line must not rescan the line each time.
+type lineAllowCache map[lineAllowKey]bool
+
+type lineAllowKey struct {
+	allowlist  *gitleaksAllowlist
+	start, end int
+}
+
+func evaluateGitleaksMatch(view *textView, rule gitleaksRule, global []gitleaksAllowlist, lines lineAllowCache, start, end int) (gitleaksMatch, bool) {
 	match := view.text[start:end]
 	secretStart, secretEnd := start, end
 	// Like gitleaks, the secret groups come from matching the regex again
@@ -139,47 +158,66 @@ func evaluateGitleaksMatch(view *textView, rule gitleaksRule, global []gitleaksA
 		end:         secretEnd,
 		match:       match,
 		secret:      secret,
-		line:        view.lineNumber(start),
 		ruleGeneric: strings.Contains(strings.ToLower(rule.id), "generic"),
 	}
 	lineStart, lineEnd := view.lineSpan(start, end)
-	lineText := view.text[lineStart:lineEnd]
-	if allowlisted(global, found, lineText) || allowlisted(rule.allowlists, found, lineText) {
+	line := lineRef{text: view.text, start: lineStart, end: lineEnd, cache: lines}
+	if allowlisted(global, found, line) || allowlisted(rule.allowlists, found, line) {
 		return gitleaksMatch{}, false
 	}
 	return found, true
 }
 
+// lineRef is the line of a match, with the per-scan cache of line-target
+// allowlist results.
+type lineRef struct {
+	text       string
+	start, end int
+	cache      lineAllowCache
+}
+
+func (line lineRef) matches(allowlist *gitleaksAllowlist) bool {
+	key := lineAllowKey{allowlist: allowlist, start: line.start, end: line.end}
+	allowed, ok := line.cache[key]
+	if !ok {
+		target := line.text[line.start:line.end]
+		allowed = target != "" && anyRegexMatch(allowlist.regexes, target)
+		line.cache[key] = allowed
+	}
+	return allowed
+}
+
 // allowlisted mirrors detect.checkFindingAllowed with no commit and no path:
 // commit and path criteria never match.
-func allowlisted(allowlists []gitleaksAllowlist, found gitleaksMatch, line string) bool {
-	for _, allowlist := range allowlists {
-		target := found.secret
-		switch allowlist.target {
-		case targetMatch:
-			target = found.match
-		case targetLine:
-			target = line
+func allowlisted(allowlists []gitleaksAllowlist, found gitleaksMatch, line lineRef) bool {
+	for i := range allowlists {
+		allowlist := &allowlists[i]
+		if allowlist.and && (allowlist.hasCommits || allowlist.hasPaths) {
+			continue // a commit or path criterion can never hold
 		}
-		regexAllowed := target != "" && anyRegexMatch(allowlist.regexes, target)
-		stopword := found.secret != "" && containsAny(strings.ToLower(found.secret), allowlist.stopwords)
+		regexAllowed := func() bool {
+			if len(allowlist.regexes) == 0 {
+				return false
+			}
+			switch allowlist.target {
+			case targetMatch:
+				return found.match != "" && anyRegexMatch(allowlist.regexes, found.match)
+			case targetLine:
+				return line.matches(allowlist)
+			default:
+				return found.secret != "" && anyRegexMatch(allowlist.regexes, found.secret)
+			}
+		}
+		stopword := func() bool {
+			return found.secret != "" && containsAny(strings.ToLower(found.secret), allowlist.stopwords)
+		}
 		if allowlist.and {
-			checks := true
-			if allowlist.hasCommits || allowlist.hasPaths {
-				checks = false
-			}
-			if len(allowlist.regexes) > 0 {
-				checks = checks && regexAllowed
-			}
-			if len(allowlist.stopwords) > 0 {
-				checks = checks && stopword
-			}
-			if checks {
+			if (len(allowlist.regexes) == 0 || regexAllowed()) && (len(allowlist.stopwords) == 0 || stopword()) {
 				return true
 			}
 			continue
 		}
-		if regexAllowed || stopword {
+		if regexAllowed() || stopword() {
 			return true
 		}
 	}
@@ -188,23 +226,39 @@ func allowlisted(allowlists []gitleaksAllowlist, found gitleaksMatch, line strin
 
 // filterGeneric mirrors detect.filter: a finding of a "generic" rule is
 // dropped when a non-generic rule found a secret containing it on the same
-// line.
+// line. Upstream compares secret strings; here the non-generic secret span
+// must contain the generic one, which is the same finding in every case
+// that matters and keeps the filter O(n log n). A generic finding equal to
+// a non-generic secret found elsewhere on the line is kept, which only
+// masks more.
 func filterGeneric(matches []gitleaksMatch) []gitleaksMatch {
+	var specific []gitleaksMatch
+	for _, m := range matches {
+		if !m.ruleGeneric {
+			specific = append(specific, m)
+		}
+	}
+	if len(specific) == len(matches) {
+		return matches
+	}
+	sort.Slice(specific, func(i, j int) bool { return specific[i].start < specific[j].start })
+	// maxEnd[i] is the largest end among specific[:i+1].
+	maxEnd := make([]int, len(specific))
+	for i, m := range specific {
+		maxEnd[i] = m.end
+		if i > 0 {
+			maxEnd[i] = max(maxEnd[i], maxEnd[i-1])
+		}
+	}
 	kept := matches[:0:0]
 	for _, candidate := range matches {
-		dropped := false
 		if candidate.ruleGeneric {
-			for _, other := range matches {
-				if other.line == candidate.line && other.rule != candidate.rule && !other.ruleGeneric &&
-					strings.Contains(other.secret, candidate.secret) {
-					dropped = true
-					break
-				}
+			i := sort.Search(len(specific), func(i int) bool { return specific[i].start > candidate.start }) - 1
+			if i >= 0 && maxEnd[i] >= candidate.end {
+				continue
 			}
 		}
-		if !dropped {
-			kept = append(kept, candidate)
-		}
+		kept = append(kept, candidate)
 	}
 	return kept
 }

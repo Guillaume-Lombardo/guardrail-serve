@@ -23,10 +23,11 @@ const (
 	groupCredential    = "credential"
 	groupAuthorization = "authorization"
 	groupBearer        = "bearer"
+	groupURLCredential = "url_credential"
 )
 
 func keywordRuleNames() []string {
-	groups := []string{groupPassword, groupSecret, groupAPIKey, groupToken, groupCredential, groupAuthorization, groupBearer}
+	groups := []string{groupPassword, groupSecret, groupAPIKey, groupToken, groupCredential, groupAuthorization, groupBearer, groupURLCredential}
 	names := make([]string, len(groups))
 	for i, group := range groups {
 		names[i] = keywordRulePrefix + group
@@ -42,14 +43,20 @@ const hspace = `[\t\p{Zs}]`
 // `=>`, `=`, `==`, `===`, `!=`, `!==`, `:`, `>` (XML elements, as in the
 // gitleaks generic rule) and the full-width ':' and '=', or
 // the prose connectors "is", "est", "was". Values are a quoted string, where
-// a backslash escapes the next character, or an unquoted run up to white
-// space or a delimiter.
+// a backslash escapes the next character, an escaped-JSON string (`\"x\"`,
+// as in JSON embedded in a JSON string), or an unquoted run up to white
+// space or a delimiter. Keys may be closed by quotes, escaped quotes or ']'.
 var assignmentPattern = regexp.MustCompile(
 	`(?P<key>(?i:mot[ _-]?de[ _-]?passe)|[\pL\pN_.\-]{1,64})` +
-		"[\"'`\\]]{0,2}" +
+		"(?:\\\\?[\"'`\\]]){0,2}" +
 		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*` +
 		`|` + hspace + `+(?i:is|est|was)` + hspace + `+)` +
-		"(?P<value>\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)*'|`[^`\\n]*`|[^\\s\\p{Zs}\"'`,;&<>(){}\\[\\]]+)")
+		`(?P<value>\\"[^"\n]*?\\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|` + "`[^`\\n]*`" +
+		`|[^\s\p{Zs}"'` + "`" + `,;&<>(){}\[\]]+)`)
+
+// urlCredentialPattern matches the password of URL user information
+// (scheme://user:password@host).
+var urlCredentialPattern = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]{1,15}://[^\s/?#@:"'<>]*:([^\s/?#"'<>]+)@`)
 
 // bearerPattern matches an RFC 6750 bearer credential outside an assignment.
 var bearerPattern = regexp.MustCompile(`(?i)\bbearer` + hspace + `+([A-Za-z0-9\-._~+/]+=*)`)
@@ -89,7 +96,11 @@ func collectAssignments(text string, from, to int, found *[]assignment) {
 		key := text[from+m[2*assignKey] : from+m[2*assignKey+1]]
 		valueStart, valueEnd := from+m[2*assignValue], from+m[2*assignValue+1]
 		quoted := false
-		if c := text[valueStart]; c == '"' || c == '\'' || c == '`' {
+		if strings.HasPrefix(text[valueStart:valueEnd], `\"`) && valueEnd-valueStart >= 4 {
+			quoted = true
+			valueStart += 2
+			valueEnd -= 2
+		} else if c := text[valueStart]; c == '"' || c == '\'' || c == '`' {
 			quoted = true
 			valueStart++
 			valueEnd--
@@ -241,6 +252,12 @@ func scanKeywords(view *textView, assignments []assignment) []rawFinding {
 			findings = append(findings, rawFinding{source: SourceKeyword, rule: keywordRulePrefix + a.group, kind: TypeSecret, start: start, end: end})
 		}
 	}
+	for _, m := range urlCredentialPattern.FindAllStringSubmatchIndex(text, -1) {
+		start, end := m[2], m[3]
+		if acceptKeywordValue(text, start, end, true, groupPassword) {
+			findings = append(findings, rawFinding{source: SourceKeyword, rule: keywordRulePrefix + groupURLCredential, kind: TypeSecret, start: start, end: end})
+		}
+	}
 	for _, m := range bearerPattern.FindAllStringSubmatchIndex(text, -1) {
 		start, end := m[2], m[3]
 		if end-start >= minBearerLength && acceptKeywordValue(text, start, end, false, groupBearer) {
@@ -271,15 +288,20 @@ var (
 		"number", "bool", "boolean", "null", "none", "nil", "undefined", "true", "false", "empty", "blank",
 		"yes", "no", "on", "off", "n/a", "tbd", "todo", "fixme", "hidden", "masked", "redacted", "removed",
 		"secret", "secrets", "password", "passwd", "token", "apikey", "api_key", "credential", "credentials",
-		"value", "example", "sample", "dummy", "placeholder")
+		"value", "example", "sample", "dummy", "placeholder", "pass", "pwd")
 	// placeholderMarkers flag letter-only values such as YOUR_API_KEY_HERE.
 	placeholderMarkers = []string{"your", "here", "example", "placeholder", "insert", "replace", "redacted", "xxx", "dummy", "sample", "fake"}
 	upperSnakeIdent    = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$`)
 	// dottedReference matches attribute paths such as config.password or
 	// process.env.API_KEY (digits only at the end of a segment), not dotted
 	// credentials such as JWTs.
-	dottedReference  = regexp.MustCompile(`^[A-Za-z_]+[0-9]*(?:\.[A-Za-z_]+[0-9]*)+$`)
-	dollarReference  = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]*$`)
+	dottedReference = regexp.MustCompile(`^[A-Za-z_]+[0-9]*(?:\.[A-Za-z_]+[0-9]*)+$`)
+	// dollarReference is the gitleaks global allowlist shape of a shell
+	// variable ($DB_PASS, $db_pass): "$ecret123" is a value.
+	dollarReference = regexp.MustCompile(`^\$(?:[A-Z_]+|[a-z_]+)$`)
+	// templateBody is the inside of a template marker: an identifier or a
+	// short phrase, not a value with digits mixed with symbols.
+	templateBody     = regexp.MustCompile(`^[\pL_ .\-]*$`)
 	pathLike         = regexp.MustCompile(`^(?:~|\.{1,2})?/[\w.\-/]*$`)
 	urlLike          = regexp.MustCompile(`^(?i)[a-z][a-z0-9+.\-]*://`)
 	letterSeparators = regexp.MustCompile(`^[A-Za-z_\-]+$`)
@@ -342,19 +364,26 @@ func isPlaceholder(value string) bool {
 }
 
 // isTemplated extends detect-secrets is_templated_secret: {x}, <x>, ${x},
-// {{ x }}, %x%, %(x)s and [x] (e.g. [REDACTED]).
+// {{ x }}, %x%, %(x)s and [x] (e.g. [REDACTED]), where x is made of letters,
+// '_', '.', '-' and spaces: "<Tr0ub4dor&3x>" is a value, not a template.
 func isTemplated(value string) bool {
 	if len(value) < 2 {
 		return true
 	}
 	first, last := value[0], value[len(value)-1]
+	body := ""
 	switch {
+	case strings.HasPrefix(value, "${") && last == '}':
+		body = value[2 : len(value)-1]
+	case strings.HasPrefix(value, "%(") && strings.HasSuffix(value, ")s") && len(value) >= 4:
+		body = value[2 : len(value)-2]
 	case first == '{' && last == '}', first == '<' && last == '>', first == '[' && last == ']',
-		first == '%' && last == '%', strings.HasPrefix(value, "${") && last == '}',
-		strings.HasPrefix(value, "%(") && strings.HasSuffix(value, ")s"):
-		return true
+		first == '%' && last == '%':
+		body = strings.Trim(value[1:len(value)-1], "{}")
+	default:
+		return false
 	}
-	return false
+	return templateBody.MatchString(body)
 }
 
 func isRepeatedRune(value string) bool {
@@ -405,7 +434,7 @@ var (
 		"prompt", "placeholder", "required", "enabled", "provider", "manager", "store", "vault", "ref",
 		"reference", "env", "var", "variable", "regex", "pattern", "mode", "algorithm", "alg", "scheme",
 		"prefix", "suffix", "template", "schema", "validator", "validation", "error", "errors", "message",
-		"msg", "rules", "requirements", "strength", "usage")
+		"msg", "rules", "requirements", "strength", "usage", "arn")
 	// keyNegatingPrefixes before the keyword mean a non-secret value:
 	// public keys, CSRF tokens, token counters, pagination tokens.
 	keyNegatingPrefixes = setOf("public", "pub", "csrf", "xsrf", "max", "min", "num", "total", "next", "page", "continuation")
@@ -420,8 +449,10 @@ var (
 //
 // Keywords are matched on the words between separators, lower-cased, so the
 // letter case cannot hide them (PassWord, dbPassword and DB_PASSWORD all
-// contain "password"). CamelCase sub-words are only used to recognise
-// descriptors, negating prefixes and identifier suffixes (apiKeyId).
+// contain "password"), and then on camelCase sub-words, so a keyword
+// followed by a qualifier is found too (passwordProd, apiKeyValue). The
+// sub-words around the keyword recognise descriptors, negating prefixes and
+// identifier suffixes (apiKeyId, csrfToken, passwordHint).
 func classifyKey(key string) (string, bool) {
 	words := splitKey(key)
 	if len(words) == 0 {
@@ -433,31 +464,64 @@ func classifyKey(key string) (string, bool) {
 	for i, word := range words {
 		lowers[i] = word.lower
 	}
-	for i := range words {
-		group, prefix := secretGroupAt(lowers, i)
-		if group == "" {
+	for i, word := range words {
+		// before and after are the camel sub-words around the keyword.
+		var before, after []string
+		for _, w := range words[:i] {
+			before = append(before, w.camel...)
+		}
+		for _, w := range words[i+1:] {
+			after = append(after, w.camel...)
+		}
+		if group, prefix := secretGroupAt(lowers, i); group != "" {
+			return keyVerdict(group, prefix, before, after, idLike)
+		}
+		if len(word.camel) < 2 {
 			continue
 		}
-		if endsWithAny(prefix, keyNegatingPrefixes) {
-			return "", idLike
-		}
-		for _, before := range words[:i] {
-			for _, sub := range before.camel {
-				if keyNegatingPrefixes[sub] {
-					return "", idLike
-				}
+		for j := range word.camel {
+			if group, prefix := secretGroupAt(word.camel, j); group != "" {
+				subBefore := append(append([]string(nil), before...), word.camel[:j]...)
+				subAfter := append(append([]string(nil), word.camel[j+1:]...), after...)
+				return keyVerdict(group, prefix, subBefore, subAfter, idLike)
 			}
 		}
-		for _, after := range words[i+1:] {
-			for _, sub := range after.camel {
-				if keyDescriptors[sub] {
-					return "", idLike
-				}
-			}
-		}
-		return group, false
 	}
 	return "", idLike
+}
+
+// keyVerdict applies negating prefixes and descriptors around a keyword.
+func keyVerdict(group, prefix string, before, after []string, idLike bool) (string, bool) {
+	if prefix != "" && isNegatingPrefix(prefix) {
+		return "", idLike
+	}
+	for _, sub := range before {
+		if keyNegatingPrefixes[sub] {
+			return "", idLike
+		}
+	}
+	for _, sub := range after {
+		if keyDescriptors[sub] {
+			return "", idLike
+		}
+	}
+	return group, false
+}
+
+// isNegatingPrefix reports whether prefix, the part of a word before its
+// keyword, is made only of negating prefixes ("csrf", "nextpage",
+// "maxtotal"). A word that merely ends with one is not: "admin" ends with
+// "min" but adminpassword holds a password.
+func isNegatingPrefix(prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	for negating := range keyNegatingPrefixes {
+		if strings.HasPrefix(prefix, negating) && isNegatingPrefix(prefix[len(negating):]) {
+			return true
+		}
+	}
+	return false
 }
 
 // secretGroupAt returns the keyword group of words[i] and the part of the
@@ -495,15 +559,6 @@ func secretGroupAt(words []string, i int) (string, string) {
 		return groupAuthorization, ""
 	}
 	return "", ""
-}
-
-func endsWithAny(word string, suffixes map[string]bool) bool {
-	for suffix := range suffixes {
-		if strings.HasSuffix(word, suffix) {
-			return true
-		}
-	}
-	return false
 }
 
 // keyWord is one separator-delimited word of a key: lower-cased without
