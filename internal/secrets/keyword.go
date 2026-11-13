@@ -46,18 +46,20 @@ const hspace = `[\t\p{Zs}]`
 // a backslash escapes the next character, an escaped-JSON string (`\"x\"`,
 // as in JSON embedded in a JSON string, where an inner quote is `\\\"` and
 // an inner backslash `\\\\`), or an unquoted run up to white space or a
-// delimiter. Keys may be closed by quotes, escaped quotes or ']'.
+// delimiter. Keys may be closed by quotes, escaped quotes, ']' or Markdown
+// bold markers (`**Password:** x`, `**Password**: x`), and "is:" is a
+// connector too ("my password is: x").
 var assignmentPattern = regexp.MustCompile(
 	`(?P<key>(?i:mot[ _-]?de[ _-]?passe)|[\pL\pN_.\-]{1,64})` +
-		"(?:\\\\?[\"'`\\]]){0,2}" +
-		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*` +
-		`|` + hspace + `+(?i:is|est|was)` + hspace + `+)` +
+		"(?:\\\\?[\"'`\\]]|\\*){0,2}" +
+		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*(?:\*{1,2}` + hspace + `*)?` +
+		`|` + hspace + `+(?i:is|est|was)(?:` + hspace + `*:)?` + hspace + `+)` +
 		`(?P<value>\\"(?:[^"\\\n]|\\\\\\"|\\\\\\\\|\\\\[^"\\\n]|\\[^"\\\n])*\\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|` + "`[^`\\n]*`" +
 		`|[^\s\p{Zs}"'` + "`" + `,;&<>(){}\[\]]+)`)
 
 // urlCredentialPattern matches the password of URL user information
 // (scheme://user:password@host).
-var urlCredentialPattern = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]{1,15}://[^\s/?#@:"'<>]*:([^\s/?#"'<>]+)@`)
+var urlCredentialPattern = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.\-]{1,15}://([^\s/?#@:"'<>]*):([^\s/?#"'<>]+)@`)
 
 // bearerPattern matches an RFC 6750 bearer credential outside an assignment.
 var bearerPattern = regexp.MustCompile(`(?i)\bbearer` + hspace + `+([A-Za-z0-9\-._~+/]+=*)`)
@@ -81,10 +83,12 @@ type assignment struct {
 	idLike     bool   // the key names an identifier (user_id, keyId...)
 }
 
-func findAssignments(view *textView) []assignment {
+func findAssignments(poll *ctxPoll, view *textView) ([]assignment, error) {
 	var found []assignment
-	collectAssignments(view.text, 0, len(view.text), &found)
-	return found
+	if err := collectAssignments(poll, view.text, 0, len(view.text), &found); err != nil {
+		return nil, err
+	}
+	return found, nil
 }
 
 // collectAssignments appends the assignments of text[from:to]. A match whose
@@ -95,11 +99,14 @@ func findAssignments(view *textView) []assignment {
 // whose own value lies past the match ("Here is password = x",
 // `Here is password="x"`), the search resumes at that key; the key is at
 // most maxKeyRunes long, so the whole scan stays linear.
-func collectAssignments(text string, from, to int, found *[]assignment) {
+func collectAssignments(poll *ctxPoll, text string, from, to int, found *[]assignment) error {
 	for from < to {
+		if err := poll.check(); err != nil {
+			return err
+		}
 		m := assignmentPattern.FindStringSubmatchIndex(text[from:to])
 		if m == nil {
-			return
+			return nil
 		}
 		next := from + m[1]
 		key := text[from+m[2*assignKey] : from+m[2*assignKey+1]]
@@ -129,12 +136,16 @@ func collectAssignments(text string, from, to int, found *[]assignment) {
 		}
 		if group == groupAuthorization {
 			a = authorizationCredential(text, a)
+			// The credential after an unquoted scheme lies past the match.
+			next = max(next, min(a.valueEnd, to))
 		}
 		*found = append(*found, a)
 		switch {
 		case group != "" || valueEnd <= valueStart:
 		case quoted:
-			collectAssignments(text, valueStart, valueEnd, found)
+			if err := collectAssignments(poll, text, valueStart, valueEnd, found); err != nil {
+				return err
+			}
 		default:
 			if nested, ok := nestedAssignment(text, valueStart, valueEnd); ok {
 				*found = append(*found, nested)
@@ -144,6 +155,7 @@ func collectAssignments(text string, from, to int, found *[]assignment) {
 		}
 		from = next
 	}
+	return nil
 }
 
 // trailingSecretKey returns the start of the secret key that ends the
@@ -260,7 +272,7 @@ func authorizationCredential(text string, a assignment) assignment {
 	end := pos
 	for end < len(text) {
 		r, size := utf8.DecodeRuneInString(text[end:])
-		if unicode.IsSpace(r) || strings.ContainsRune("\"'`,;", r) {
+		if isValueDelimiter(r) {
 			break
 		}
 		end += size
@@ -273,10 +285,19 @@ func authorizationCredential(text string, a assignment) assignment {
 	return a
 }
 
-func scanKeywords(view *textView, assignments []assignment) []rawFinding {
+// isValueDelimiter reports the runes that end an unquoted value, as in the
+// value class of assignmentPattern.
+func isValueDelimiter(r rune) bool {
+	return unicode.IsSpace(r) || unicode.Is(unicode.Zs, r) || strings.ContainsRune("\"'`,;&<>(){}[]", r)
+}
+
+func scanKeywords(poll *ctxPoll, view *textView, assignments []assignment) ([]rawFinding, error) {
 	text := view.text
 	var findings []rawFinding
 	for _, a := range assignments {
+		if err := poll.check(); err != nil {
+			return nil, err
+		}
 		if a.group == "" || a.valueEnd <= a.valueStart {
 			continue
 		}
@@ -285,14 +306,20 @@ func scanKeywords(view *textView, assignments []assignment) []rawFinding {
 			if a.comparison {
 				continue // user.password != confirmPassword compares identifiers
 			}
-			end = trimSentenceDot(text, start, end)
+			if end < len(text) && (text[end] == '(' || text[end] == '[') {
+				continue // indirect reference: get_secret(), env['KEY']
+			}
+			end = trimSentenceDot(text, start, extendUnquoted(text, start, end))
 		}
 		if acceptKeywordValue(text, start, end, a.quoted, a.group) {
 			findings = append(findings, rawFinding{source: SourceKeyword, rule: keywordRulePrefix + a.group, kind: TypeSecret, start: start, end: end})
 		}
 	}
 	for _, m := range urlCredentialPattern.FindAllStringSubmatchIndex(text, -1) {
-		start, end := m[2], m[3]
+		user, start, end := text[m[2]:m[3]], m[4], m[5]
+		if allDigits(text[start:end]) && (user == "" || strings.Contains(user, ".")) {
+			continue // host:port@... is not user information
+		}
 		if acceptKeywordValue(text, start, end, true, groupPassword) {
 			findings = append(findings, rawFinding{source: SourceKeyword, rule: keywordRulePrefix + groupURLCredential, kind: TypeSecret, start: start, end: end})
 		}
@@ -303,7 +330,64 @@ func scanKeywords(view *textView, assignments []assignment) []rawFinding {
 			findings = append(findings, rawFinding{source: SourceKeyword, rule: keywordRulePrefix + groupBearer, kind: TypeSecret, start: start, end: end})
 		}
 	}
-	return findings
+	return findings, nil
+}
+
+// extendUnquoted extends an unquoted value over the delimiters that cannot
+// end a credential in free text (`Tr0ub4dor&3x`, `Xk9;vL7`, `a)b`), so that
+// masking does not leave its tail visible. It stops at white space, quotes,
+// '<' and '>' (markup), at a delimiter that starts another `key=value`
+// (query strings, shell, argument lists) and after maxValueExtension bytes;
+// trailing ',', ';' and unbalanced closing brackets belong to the
+// surrounding syntax.
+func extendUnquoted(text string, start, end int) int {
+	extended := end
+	limit := min(len(text), end+maxValueExtension)
+	for extended < limit {
+		r, size := utf8.DecodeRuneInString(text[extended:])
+		if unicode.IsSpace(r) || unicode.Is(unicode.Zs, r) || strings.ContainsRune("\"'`<>", r) {
+			break
+		}
+		if strings.ContainsRune("&;,(){}[]", r) && startsAssignment(text, extended+size) {
+			break
+		}
+		extended += size
+	}
+	for extended > end {
+		c := text[extended-1]
+		if c != ',' && c != ';' && !unbalancedCloser(text[start:extended], c) {
+			break
+		}
+		extended--
+	}
+	return extended
+}
+
+// unbalancedCloser reports whether c is a closing bracket that closes more
+// than s opens: `${DB_PASS}` keeps its brace, `f(password=x)` drops it.
+func unbalancedCloser(s string, c byte) bool {
+	open := map[byte]byte{')': '(', '}': '{', ']': '['}[c]
+	if open == 0 {
+		return false
+	}
+	return strings.Count(s, string(c)) > strings.Count(s, string(open))
+}
+
+// maxValueExtension bounds extendUnquoted, in bytes, so that many values in
+// one long run cannot each extend over the rest of it.
+const maxValueExtension = 256
+
+// startsAssignment reports whether text[pos:] starts with `key=`.
+func startsAssignment(text string, pos int) bool {
+	keyEnd := pos
+	for n := 0; n < maxKeyRunes && keyEnd < len(text); n++ {
+		r, size := utf8.DecodeRuneInString(text[keyEnd:])
+		if !isKeyRune(r) {
+			break
+		}
+		keyEnd += size
+	}
+	return keyEnd > pos && keyEnd < len(text) && text[keyEnd] == '='
 }
 
 // trimSentenceDot drops one final '.' that ends a sentence ("... is s3cr3t.").
@@ -344,6 +428,8 @@ var (
 	pathLike         = regexp.MustCompile(`^(?:~|\.{1,2})?/[\w.\-/]*$`)
 	urlLike          = regexp.MustCompile(`^(?i)[a-z][a-z0-9+.\-]*://`)
 	letterSeparators = regexp.MustCompile(`^[A-Za-z_\-]+$`)
+	identifierLike   = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
+	lowerCamel       = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+$`)
 )
 
 // acceptKeywordValue decides whether an assignment value is reported. The
@@ -376,9 +462,35 @@ func acceptKeywordValue(text string, start, end int, quoted bool, group string) 
 		pathLike.MatchString(value) || urlLike.MatchString(value) {
 		return false
 	}
+	if isCodeReference(text, value, end) {
+		return false
+	}
 	// A plain word (letters, hyphens, underscores, dots) is prose or a
 	// reference; credentials carry a digit, a symbol or inner capitals.
 	return digits > 0 || symbols > 0 || innerUpper
+}
+
+// isCodeReference recognises unquoted values that are program identifiers
+// rather than credentials: a variable named like a secret
+// (`clientSecret: clientSecret`, `password: hashedPassword`), a negated
+// identifier (`!showPassword`), or a lowerCamel identifier followed by code
+// punctuation (`token: nextValue,`, `key = cfgKey ?? fallback`).
+func isCodeReference(text, value string, end int) bool {
+	if strings.HasPrefix(value, "!") && identifierLike.MatchString(value[1:]) && value[1] >= 'a' && value[1] <= 'z' {
+		return true
+	}
+	if !identifierLike.MatchString(value) {
+		return false
+	}
+	if group, _ := classifyKey(value); group != "" {
+		return true
+	}
+	if !lowerCamel.MatchString(value) {
+		return false
+	}
+	rest := strings.TrimLeft(text[end:], " \t")
+	return rest != "" && (strings.ContainsRune(",;)}", rune(rest[0])) ||
+		strings.HasPrefix(rest, "??") || strings.HasPrefix(rest, "||") || strings.HasPrefix(rest, "&&"))
 }
 
 func isPlaceholder(value string) bool {
@@ -477,10 +589,13 @@ var (
 	// keyNegatingPrefixes before the keyword mean a non-secret value:
 	// public keys, CSRF tokens, token counters, pagination tokens.
 	keyNegatingPrefixes = setOf("public", "pub", "csrf", "xsrf", "max", "min", "num", "total", "next", "page", "continuation")
-	idKeys              = setOf("id", "myid", "userid")
-	idSuffixes          = setOf("id", "ids", "uuid", "guid")
-	passwordSuffixes    = []string{"password", "passwd", "passphrase", "pwd", "contrasena", "contraseña"}
-	passwordQualifiers  = setOf("db", "database", "key")
+	// tokenOnlyNegations negate tokens only: nextPageToken is pagination,
+	// nextPassword is a new password.
+	tokenOnlyNegations = setOf("next", "page", "continuation")
+	idKeys             = setOf("id", "myid", "userid")
+	idSuffixes         = setOf("id", "ids", "uuid", "guid")
+	passwordSuffixes   = []string{"password", "passwd", "passphrase", "pwd", "contrasena", "contraseña"}
+	passwordQualifiers = setOf("db", "database", "key")
 )
 
 // classifyKey returns the keyword group of a key ("" when it does not name a
@@ -513,9 +628,9 @@ func classifyKey(key string) (string, bool) {
 			after = append(after, w.camel...)
 		}
 		if group, prefix := secretGroupAt(lowers, i); group != "" {
-			// The keyword ends the word: every other camel sub-word of the
-			// word precedes it (getCsrfToken, myNextPageToken).
-			return keyVerdict(group, prefix, append(before, word.camel...), after, idLike)
+			// The keyword ends the word: the camel sub-words before it
+			// precede it (getCsrfToken, myNextPageToken).
+			return keyVerdict(group, prefix, append(before, subWordsBefore(word.camel, word.lower[len(prefix):])...), after, idLike)
 		}
 		if len(word.camel) < 2 {
 			continue
@@ -533,13 +648,20 @@ func classifyKey(key string) (string, bool) {
 
 // keyVerdict applies negating prefixes and descriptors around a keyword.
 func keyVerdict(group, prefix string, before, after []string, idLike bool) (string, bool) {
-	if prefix != "" && isNegatingPrefix(prefix) {
+	if prefix != "" && isNegatingPrefix(prefix, group) {
 		return "", idLike
 	}
-	for _, sub := range before {
-		if keyNegatingPrefixes[sub] {
+	// The nearest sub-word before the keyword, past qualifiers, negates it:
+	// csrf in getCsrfToken, page in myNextPageToken, public in
+	// public_api_key, but not min in MinIOPassword.
+	for i := len(before) - 1; i >= 0; i-- {
+		if keyQualifiers[before[i]] {
+			continue
+		}
+		if negates(before[i], group) {
 			return "", idLike
 		}
+		break
 	}
 	for _, sub := range after {
 		if keyDescriptors[sub] {
@@ -549,16 +671,33 @@ func keyVerdict(group, prefix string, before, after []string, idLike bool) (stri
 	return group, false
 }
 
+// subWordsBefore drops from camel the trailing sub-words that spell the
+// keyword at the end of the word.
+func subWordsBefore(camel []string, keyword string) []string {
+	spelled := ""
+	end := len(camel)
+	for end > 0 && strings.HasSuffix(keyword, camel[end-1]+spelled) {
+		spelled = camel[end-1] + spelled
+		end--
+	}
+	return camel[:end]
+}
+
+// negates reports whether word negates a keyword of group.
+func negates(word, group string) bool {
+	return keyNegatingPrefixes[word] && (group == groupToken || !tokenOnlyNegations[word])
+}
+
 // isNegatingPrefix reports whether prefix, the part of a word before its
 // keyword, is made only of negating prefixes ("csrf", "nextpage",
 // "maxtotal"). A word that merely ends with one is not: "admin" ends with
 // "min" but adminpassword holds a password.
-func isNegatingPrefix(prefix string) bool {
+func isNegatingPrefix(prefix, group string) bool {
 	if prefix == "" {
 		return true
 	}
 	for negating := range keyNegatingPrefixes {
-		if strings.HasPrefix(prefix, negating) && isNegatingPrefix(prefix[len(negating):]) {
+		if negates(negating, group) && strings.HasPrefix(prefix, negating) && isNegatingPrefix(prefix[len(negating):], group) {
 			return true
 		}
 	}

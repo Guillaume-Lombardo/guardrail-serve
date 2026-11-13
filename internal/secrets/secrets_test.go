@@ -183,3 +183,22 @@ func TestScanIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestKeywordAndEntropyPhasesHonourContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	view := newTextView(strings.Repeat("password=Xk9mQ2vL7\n", 2*ctxCheckInterval))
+	if _, err := findAssignments(&ctxPoll{ctx: ctx}, view); !errors.Is(err, context.Canceled) {
+		t.Errorf("findAssignments err = %v", err)
+	}
+	assignments, err := findAssignments(&ctxPoll{ctx: context.Background()}, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scanKeywords(&ctxPoll{ctx: ctx}, view, assignments); !errors.Is(err, context.Canceled) {
+		t.Errorf("scanKeywords err = %v", err)
+	}
+	if _, err := scanEntropy(&ctxPoll{ctx: ctx}, view, assignments, DefaultConfig().Entropy); !errors.Is(err, context.Canceled) {
+		t.Errorf("scanEntropy err = %v", err)
+	}
+}

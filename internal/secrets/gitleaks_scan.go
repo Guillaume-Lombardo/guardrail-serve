@@ -102,9 +102,23 @@ func scanGitleaks(ctx context.Context, view *textView, rules []gitleaksRule, glo
 	return findings, nil
 }
 
-// ctxCheckInterval is how many matches of one rule are evaluated between
-// two context checks.
+// ctxCheckInterval is how many matches, assignments or candidates are
+// evaluated between two context checks.
 const ctxCheckInterval = 256
+
+// ctxPoll checks the context every ctxCheckInterval steps of a scan phase.
+type ctxPoll struct {
+	ctx context.Context
+	n   int
+}
+
+func (p *ctxPoll) check() error {
+	p.n++
+	if p.n%ctxCheckInterval != 0 {
+		return nil
+	}
+	return p.ctx.Err()
+}
 
 // lineAllowCache memoizes the line-target regexes of an allowlist per line:
 // many matches on one long line must not rescan the line each time.

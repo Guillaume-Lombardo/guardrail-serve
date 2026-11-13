@@ -198,10 +198,12 @@ func BenchmarkAdversarialInputs(b *testing.B) {
 		b.Fatal(err)
 	}
 	inputs := map[string]string{
-		"assignments": strings.Repeat("x=1\n", 16<<10),
-		"passwords":   strings.Repeat("password=hunter2\n", 4<<10),
-		"chain":       "x=" + strings.Repeat("a=", 32<<10),
-		"base64":      strings.Repeat("aZ3kQ9mX2pL7vN5sR8tW4yB6cD1fG0hJ", 2<<10),
+		"assignments":   strings.Repeat("x=1\n", 16<<10),
+		"passwords":     strings.Repeat("password=hunter2\n", 4<<10),
+		"chain":         "x=" + strings.Repeat("a=", 32<<10),
+		"base64":        strings.Repeat("aZ3kQ9mX2pL7vN5sR8tW4yB6cD1fG0hJ", 2<<10),
+		"authorization": strings.Repeat("authorization:basic<", 4<<10),
+		"nestedAuth":    strings.Repeat("x=authorization=basic&", 4<<10),
 	}
 	for name, text := range inputs {
 		b.Run(name, func(b *testing.B) {

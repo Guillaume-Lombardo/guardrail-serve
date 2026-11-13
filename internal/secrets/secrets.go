@@ -207,18 +207,30 @@ func (s *Scanner) Scan(ctx context.Context, text string) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	poll := &ctxPoll{ctx: ctx}
 	var assignments []assignment
 	if s.keywords || s.entropy != nil {
-		assignments = findAssignments(view)
+		var err error
+		if assignments, err = findAssignments(poll, view); err != nil {
+			return nil, err
+		}
 	}
 	if s.keywords {
-		raw = append(raw, scanKeywords(view, assignments)...)
+		found, err := scanKeywords(poll, view, assignments)
+		if err != nil {
+			return nil, err
+		}
+		raw = append(raw, found...)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if s.entropy != nil {
-		raw = append(raw, scanEntropy(view, assignments, *s.entropy)...)
+		found, err := scanEntropy(poll, view, assignments, *s.entropy)
+		if err != nil {
+			return nil, err
+		}
+		raw = append(raw, found...)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

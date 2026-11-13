@@ -58,6 +58,10 @@ func TestContextualSecretVariants(t *testing.T) {
 		{`{\"password\":\"%s\"}`, "keyword:password"},
 		{`"{\"db\": {\"password\": \"%s\"}}"`, "keyword:password"},
 		{"adminPassword: %s", "keyword:password"},
+		{"**Password:** %s", "keyword:password"},
+		{"**Password**: %s", "keyword:password"},
+		{"My password is: %s", "keyword:password"},
+		{"Le mot de passe est : %s", "keyword:password"},
 		{"passwordProd=%s", "keyword:password"},
 		{`"Authorization": "Token %s"`, "keyword:authorization"},
 	}
@@ -169,6 +173,15 @@ func TestClassifyKey(t *testing.T) {
 		{"secretArn", "", false},
 		{"myNextPageToken", "", false},
 		{"getCsrfToken", "", false},
+		{"MinIOPassword", groupPassword, false},
+		{"MinIOSecret", groupSecret, false},
+		{"MinIOToken", groupToken, false},
+		{"min_io_password", groupPassword, false},
+		{"public_api_key", "", false},
+		{"x_csrf_token", "", false},
+		{"pageToken", "", false},
+		{"nextPassword", groupPassword, false},
+		{"nextpassword", groupPassword, false},
 	}
 	for _, tc := range cases {
 		group, idLike := classifyKey(tc.key)
@@ -287,10 +300,53 @@ func TestURLCredentials(t *testing.T) {
 		"https://user:${DB_PASSWORD}@example.com/",
 		"https://user:****@example.com/",
 		"https://example.com:8443/path",
+		"https://example.com:8080@foo",
 		"mailto:someone@example.com",
 	} {
 		if findings := scan(t, scanner, text); len(findings) != 0 {
 			t.Errorf("%q: unexpected %s", text, describe(findings))
+		}
+	}
+}
+
+func TestUnquotedValueSpans(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	for _, tc := range []struct{ text, value string }{
+		{"password=Tr0ub4dor&3xyzQ", "Tr0ub4dor&3xyzQ"},
+		{"password=Xk9mQ2;vL7zzz now", "Xk9mQ2;vL7zzz"},
+		{"PASSWORD=Xk9mQ2vL7; export PASSWORD", "Xk9mQ2vL7"},
+		{"https://x.example/login?password=Xk9mQ2vL7&next=/home", "Xk9mQ2vL7"},
+		{"connect(password=Xk9mQ2vL7, user=bob)", "Xk9mQ2vL7"},
+		{"f(password=Xk9mQ2vL7)", "Xk9mQ2vL7"},
+		{"password=Xk9{mQ2}vL7", "Xk9{mQ2}vL7"},
+		{"<password>Xk9mQ2vL7</password>", "Xk9mQ2vL7"},
+	} {
+		start := strings.Index(tc.text, tc.value)
+		if findings := scan(t, scanner, tc.text); len(findings) != 1 || !hasFinding(findings, "keyword:password", start, start+len(tc.value)) {
+			t.Errorf("%q: want one finding on %q, got %s", tc.text, tc.value, describe(findings))
+		}
+	}
+}
+
+func TestCodeReferencesAreNotSecrets(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	for _, text := range []string{
+		"const body = { clientSecret: clientSecret };",
+		"accessToken: accessToken,",
+		"refreshToken: newRefreshToken",
+		"password: hashedPassword,",
+		"secretKey = secretKey ?? fallbackKey",
+		"showPassword = !showPassword",
+		"token: nextValue,",
+		"const apiKey = config.apiKey;",
+	} {
+		if findings := scan(t, scanner, text); len(findings) != 0 {
+			t.Errorf("%q: unexpected %s", text, describe(findings))
+		}
+	}
+	for _, text := range []string{"password: hunter2Go", "password: !Abc123x", "nextPassword=Xk9mQ2vL7"} {
+		if findings := scan(t, scanner, text); len(findings) != 1 {
+			t.Errorf("%q: want one finding, got %s", text, describe(findings))
 		}
 	}
 }

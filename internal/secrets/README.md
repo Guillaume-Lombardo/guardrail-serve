@@ -19,7 +19,8 @@ findings, err := scanner.Scan(ctx, text)
   is immutable and safe for concurrent use.
 - `Scan(ctx, text)` returns findings sorted by start, end, source and rule.
   Its only error is the context error (`ctx.Err()`), checked between
-  sources, between gitleaks rules and every 256 matches of a rule.
+  sources, between gitleaks rules, and every 256 regex matches,
+  assignments or entropy runs inside each source.
 - `Rules()` lists the rule names a scanner can report, sorted.
 - `ExcludedGitleaksRules()` lists the vendored gitleaks rules that never
   apply to free text, with the reason.
@@ -64,9 +65,10 @@ kept (they are distinct facts). Partial overlaps are kept.
 ### gitleaks
 
 `rules/gitleaks.toml` is the gitleaks default configuration, version v8.30.1,
-commit `83d9cd684c87d95d656c1458ef04895a7f1cbd8e`, vendored byte for byte
-below a provenance and MIT license header (a test checks the upstream
-SHA-256). It is parsed by a strict TOML subset parser at first use: any
+commit `83d9cd684c87d95d656c1458ef04895a7f1cbd8e`, vendored below a
+provenance and MIT license header, unchanged except for its final empty line
+(removed by the end-of-file-fixer hook; a test appends it back and checks the
+upstream SHA-256). It is parsed by a strict TOML subset parser at first use: any
 unknown key, table or syntax is an error, so an upstream refresh cannot
 silently drop a field. Every regular expression compiles with Go RE2.
 
@@ -142,9 +144,12 @@ a keyword followed by another word is found too (`passwordProd`,
 `secretValue`, `apiKeyValue`). Keys that describe a secret instead of holding it are
 not secret keys: a descriptor after the keyword (`password_length`,
 `token_url`, `secret_name`, `passwordHint`), a negating prefix (`public_key`,
-`csrf_token`, `nextPageToken`, `max_tokens`; a word prefix negates only when
-it is made entirely of negating prefixes, so `adminPassword` is not negated
-by "min") or an identifier suffix
+`csrf_token`, `nextPageToken`, `public_api_key`: only the nearest word
+before the keyword, past qualifiers such as `api`, negates it, and a
+lower-case word prefix only when it is made entirely of negating prefixes,
+so `adminPassword` and `MinIOPassword` are not negated by "min";
+`next`, `page` and `continuation` negate tokens only, so `nextPassword` is a
+password) or an identifier suffix
 (`api_key_id`, `client_id`). `Authorization` values skip the scheme (`Basic`,
 `Token`, `Bearer`…). A standalone `Bearer <credential>` of at least 16
 characters is also reported as `keyword:bearer`, and the password of URL
@@ -166,10 +171,19 @@ Value rules (deterministic, in this order):
 4. quoted values are accepted at this point;
 5. unquoted values are rejected when they are comparisons (`!=`, `==`), calls
    or subscripts (`get_secret()`, `env['KEY']`), `UPPER_SNAKE` names, dotted
-   attribute paths (`config.secret`), paths or URLs; otherwise they need a
-   digit, a symbol or an inner capital letter (plain words are prose).
+   attribute paths (`config.secret`), paths or URLs, or code references:
+   an identifier named like a secret (`clientSecret: clientSecret`,
+   `password: hashedPassword`), a negated identifier (`!showPassword`), or a
+   lowerCamel identifier followed by code punctuation (`,`, `;`, `)`, `}`,
+   `??`, `||`, `&&`); otherwise they need a digit, a symbol or an inner
+   capital letter (plain words are prose).
 
-A final sentence dot is trimmed from unquoted values.
+An unquoted value is extended over the delimiters that cannot end a
+credential in free text (`password=Tr0ub4dor&3x`, `Xk9;vL7`), so masking does
+not leave its tail visible. The extension stops at white space, quotes, `<`,
+`>`, a delimiter that starts another `key=value` (`&next=`, `;user=`,
+`, user=`) and after 256 bytes; a trailing `,`, `;` or unbalanced closing
+bracket is left out. A final sentence dot is trimmed from unquoted values.
 
 ### entropy
 
@@ -210,6 +224,17 @@ git SHA is still reported when it is assigned to a secret key.
   (see ADR 0008).
 - A YAML value on the line after its key (`password:` then an indented
   value) is not an assignment.
+- Labels that are not a single key are not keys: Markdown tables
+  (`| Password | x |`), multi-word labels (`API key: x`) and sentences such
+  as `the password for admin is x`. Markdown bold labels (`**Password:** x`)
+  and `is:` are supported.
+- An unquoted value immediately followed by `(` or `[` is read as a call or
+  subscript and not reported (`password=Ab1(cdef`); a final `.` of an
+  unquoted value is read as the end of the sentence and stays visible.
+- URL user information whose password contains a raw `/`, `?` or `#`
+  (invalid but common in pasted DSNs) is not reported by
+  `keyword:url_credential`; a numeric "password" after a host-like user part
+  (`host.example:8080@`) is read as a port.
 - A template marker around a letter-only body (`<Tr0ub4dor>` is reported,
   `<hunter>` is not) and a shell variable shape (`$db_pass`) are treated as
   placeholders.

@@ -53,7 +53,7 @@ const hashContextWindow = 32
 // HTML integrity attributes).
 var subresourceIntegrityPrefixes = []string{"sha1-", "sha256-", "sha384-", "sha512-"}
 
-func scanEntropy(view *textView, assignments []assignment, cfg EntropyConfig) []rawFinding {
+func scanEntropy(poll *ctxPoll, view *textView, assignments []assignment, cfg EntropyConfig) ([]rawFinding, error) {
 	text := view.text
 	urls := newSpanIndex(urlPattern.FindAllStringIndex(text, -1))
 	var strongSpans, idSpans [][]int
@@ -71,6 +71,9 @@ func scanEntropy(view *textView, assignments []assignment, cfg EntropyConfig) []
 		if !isBase64Byte(text[pos]) {
 			pos++
 			continue
+		}
+		if err := poll.check(); err != nil {
+			return nil, err
 		}
 		runStart := pos
 		for pos < len(text) && isBase64Byte(text[pos]) {
@@ -90,7 +93,7 @@ func scanEntropy(view *textView, assignments []assignment, cfg EntropyConfig) []
 			}
 		}
 	}
-	return findings
+	return findings, nil
 }
 
 // splitPadding splits a run at internal '=' sequences: base64 only pads at the
