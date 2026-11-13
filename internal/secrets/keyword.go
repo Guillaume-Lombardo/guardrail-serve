@@ -115,6 +115,9 @@ func collectAssignments(poll *ctxPoll, text string, from, to int, found *[]assig
 		valueStart, valueEnd := from+m[2*assignValue], from+m[2*assignValue+1]
 		if m[2*assignMD] >= 0 {
 			valueStart, valueEnd = markdownValue(text, from+m[2*assignKey], from+m[2*assignMD], from+m[2*assignMD+1], valueStart, valueEnd)
+			// When the value is the markers alone, what followed them is
+			// searched again.
+			next = min(next, valueEnd)
 		}
 		quoted := false
 		if strings.HasPrefix(text[valueStart:valueEnd], `\"`) && valueEnd-valueStart >= 4 {

@@ -108,6 +108,20 @@ func TestAuthorizationCredentialHidingAssignment(t *testing.T) {
 	}
 }
 
+func TestMarkdownMarkersDoNotHideAssignments(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	for _, tc := range []struct{ text, rule string }{
+		{"note: * password=Tr0ub4dor", "keyword:password"},
+		{`password=* token="Tr0ub4dor"`, "keyword:token"},
+	} {
+		start := strings.Index(tc.text, "Tr0ub4dor")
+		findings := scan(t, scanner, tc.text)
+		if len(findings) != 1 || !hasFinding(findings, tc.rule, start, start+len("Tr0ub4dor")) {
+			t.Errorf("%q: want one %s finding on the value, got %s", tc.text, tc.rule, describe(findings))
+		}
+	}
+}
+
 func TestDigitOnlyValues(t *testing.T) {
 	scanner := mustScanner(t, keywordsOnly())
 	if findings := scan(t, scanner, "pin password: 84736291"); len(findings) != 1 {
