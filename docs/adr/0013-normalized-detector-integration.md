@@ -29,8 +29,10 @@ no partial detections. It also rejects U+FFFD, including genuine U+FFFD, because
 JSON decoding repairs malformed bytes and unpaired surrogates into that rune.
 This conservative choice avoids silent loss of a match inside a damaged keyword
 without modifying the decoder, admission or the standalone normalization core.
-The existing detector-error response is HTTP 500, with no findings/texts and no
-input values in errors. Consumers must treat this response as failed evaluation.
+The existing detector-error response is HTTP 502, consistent with
+[ADR 0007](0007-policy-engine-and-findings.md), with the stable JSON detail
+`Guardrail execution failed.`, no findings/texts and no input values in errors.
+Consumers must treat this response as failed evaluation.
 A future transport contract may introduce a specific 4xx invalid-text response.
 
 Rejected: silently skip invalid offsets (could allow hostile text), repair the
