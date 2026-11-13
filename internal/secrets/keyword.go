@@ -176,6 +176,16 @@ func collectAssignments(poll *ctxPoll, text string, from, to int, found *[]assig
 // ("password" or "password="), so its own value can be matched. The key
 // starts inside the value, after the match start, so resuming progresses.
 func trailingSecretKey(text string, start, end int) (int, bool) {
+	// A preceding prose label may consume only "mot" as its value. Resume
+	// at it when the remaining text starts with a full French assignment.
+	if strings.EqualFold(text[start:end], "mot") {
+		if m := assignmentPattern.FindStringSubmatchIndex(text[start:]); m != nil && m[0] == 0 {
+			if group, _ := classifyKey(text[start+m[2*assignKey] : start+m[2*assignKey+1]]); group != "" {
+				return start, true
+			}
+		}
+	}
+
 	for end > start {
 		r, size := utf8.DecodeLastRuneInString(text[start:end])
 		if !isOperatorRune(r) {

@@ -55,7 +55,7 @@ func NewHandlerWithRegistry(cfg config.Config, logger *slog.Logger, registry *pr
 	if err := cfg.Runtime.Validate(); err != nil {
 		return nil, err
 	}
-	secretPatterns, err := resources.LoadPatterns(cfg.GuardrailsConfigDir, "detect_secret_contextual_patterns.yaml")
+	secretPatterns, err := resources.LoadSecretPatterns(cfg.GuardrailsConfigDir)
 	if err != nil {
 		return nil, fmt.Errorf("load secret patterns: %w", err)
 	}
