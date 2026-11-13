@@ -326,7 +326,6 @@ Implementation:
   original findings, typed masks, detect/annotate and checksums.
 - Golden compatibility differs only by removal of the broad tool-listing false
   positive. Environment files unchanged: no new environment contract.
-||||||| parent of 9a5d491 (feat: observe policy and detector executions with Prometheus)
 ## L8b — Prometheus metrics
 
 Validated scope: per-handler injectable registry, authenticated `/metrics` on the
@@ -347,5 +346,6 @@ Delivered:
   smoke validates a secret scan, redaction, 401 without a key and authenticated
   metrics containing the actual intervention but no matched value. Session
   container removed after the smoke; no image published.
-- Independent review: one round, APPROVE, no open findings.
+- Independent review: initial APPROVE, rebase recheck and final confirmation;
+  three rounds total, final APPROVE with no open findings.
 - No environment contract change; no archive, regex/YAML or other-lot changes.

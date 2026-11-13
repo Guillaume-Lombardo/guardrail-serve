@@ -339,7 +339,6 @@ it cannot be distinguished from damaged input. Offsets always refer to valid
 original UTF-8, never to a repaired string. Policies that do not run either
 detector retain their existing behavior. No admission/body/rune limit changes.
 See [ADR 0013](docs/adr/0013-normalized-detector-integration.md).
-||||||| parent of 9a5d491 (feat: observe policy and detector executions with Prometheus)
 ## Prometheus metrics
 
 `GET /metrics` on the API listener (prefixed by `API_PREFIX`, if configured)
