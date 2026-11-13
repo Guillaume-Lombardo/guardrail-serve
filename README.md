@@ -438,8 +438,8 @@ positive (`frinj-neg-011`) are kept as labelled known failures; see
 the failure analysis. On both corpora the gate also enforces absolute French
 floors for `prompt_injection`/`fr`: recall at least 85% and FPR at most 5%, both
 defined (ADR 0018). These are deterministic-rule results only; they say nothing
-about the optional semantic sidecar, which has not been scored on these corpora
-yet.
+about the optional semantic sidecar. Its separate measurements and limitations
+are documented in [`deploy/semantic-sidecar/EVALUATION.md`](deploy/semantic-sidecar/EVALUATION.md).
 
 For every detector total and detector/language group, precision/recall must be
 at least baseline and FPR at most baseline. Every previously correct case label
