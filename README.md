@@ -429,3 +429,69 @@ The refresh refuses regressions against the old baseline. Review and commit the
 old/new metrics and corrected case IDs as evidence; do not relax thresholds or
 edit corpus labels to get a pass. See [ADR 0015](docs/adr/0015-offline-regression-gate.md)
 and the [evaluation CLI documentation](cmd/guardrail-eval/README.md).
+
+### Optional semantic policy detector (L6b)
+
+`semantic_prompt_injection` supports input and output policy stages. It is disabled
+by default; embedded policies and legacy `/scan` behavior are unchanged. Enable
+it explicitly and install [example policies](examples/semantic/policies/policies.yaml)
+via `GUARDRAILS_CONFIG_DIR`; set `LITELLM_DEFAULT_POLICY=semantic` if appropriate.
+A policy naming this detector while disabled fails startup as an unknown detector.
+
+| Environment | Default | Contract |
+| --- | --- | --- |
+| `SEMANTIC_ENABLED` | `false` | Boolean; register optional detector |
+| `SEMANTIC_URL` | empty | Required when enabled; static absolute HTTP(S) endpoint, no credentials/fragment |
+| `SEMANTIC_FORMAT` | `scores` | `scores` or `tei_predict` |
+| `SEMANTIC_TIMEOUT` | `2s` | Positive duration for one text, including all chunk batches |
+| `SEMANTIC_THRESHOLD` | `0.9` | Finite score in (0,1]; equality triggers |
+| `SEMANTIC_FAILURE_MODE` | `closed` | `open` or `closed` |
+| `SEMANTIC_MALICIOUS_LABELS` | `MALICIOUS` | Nonempty comma-separated TEI labels, case-insensitive |
+
+These settings are operator-only. Request metadata, forwarded headers and provider
+params never select URLs, credentials or thresholds. No sidecar auth forwarding
+is implemented. Config parsing/handler construction makes no network calls.
+
+For `scores`, POST `{"texts":["sample"]}` to the configured URL and return
+`{"scores":[0.92]}` (one finite attack probability per item in original order).
+For `tei_predict`, configure the full `/predict` URL; requests use
+`{"inputs":[["sample"]],"raw_scores":false,"truncate":false}` and responses use
+`[[{"label":"BENIGN","score":0.08},{"label":"MALICIOUS","score":0.92}]]`.
+Use labels from the actual checkpoint's id2label mapping, not guessed label IDs.
+The [L6a client contract](internal/semantic/httpclassifier/README.md) documents
+chunk/batch/response bounds and invalid-response behavior. Classification emits
+one finding per triggered original text, with its maximum score and whole-text
+rune span, fixed type `PROMPT_INJECTION` and rule `semantic_classification`.
+It cannot locate the malicious fragment. Enforce/block blocks; annotate reports
+findings without intervention; detect mode reports hypothetical actions unchanged.
+
+Fail-closed provider errors return **502** `{"detail":"Guardrail execution failed."}`
+without URLs, text, response bodies or secrets. Configure LiteLLM's own fail-closed
+handling to block on provider errors. Fail-open can return `NONE`; each degraded
+text evaluation emits a structured warning `semantic classifier degraded` with
+fixed `detector` and `failure_mode` fields. Alert on that warning. L8b detector
+metrics still record clean/match/error; fail-open counts as clean and requires the
+warning to distinguish unavailable classification. Caller cancellation is never
+converted to a successful fail-open result. LiteLLM responses keep exactly the
+existing `action`, optional `blocked_reason`, and `texts` contract; no metadata is
+added. Native v1 findings include the score and correct `text_index`.
+
+[Compose example](examples/semantic/compose.yaml) wires the service to an external
+sidecar on `classifier:8080/classify`. Set `SEMANTIC_SIDECAR_IMAGE` to your compatible
+image (prefer an immutable digest). The example deliberately supplies no model
+image and is not a verified model deployment. Build/Compose validation belongs on
+the designated build host; it was not run on docker-box for this change.
+
+Prompt Guard 2 offers 22M/86M checkpoints; Meta describes its mDeBERTa basis and
+Llama 4 license in the [primary implementation documentation](https://github.com/meta-llama/PurpleLlama/blob/main/Llama-Prompt-Guard-2/README.md).
+Check the [22M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M)
+and [86M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
+for access, label mapping, license and use restrictions before downloading.
+Nominal FP32 weights alone are roughly 88/344 MB; runtime memory and tokenization
+add overhead. Checkpoints are not bundled. The [TEI supported architectures](https://huggingface.co/docs/text-embeddings-inference/supported_models)
+do not list mDeBERTa: a TEI `/predict` wire format does **not** establish Prompt Guard
+compatibility with a stock TEI image. Supply a compatible external server or a
+validated custom implementation; no Python runtime, CGO, model or provider is
+required by the Go service or its fixed-fixture/httptest suites. The rune chunk
+heuristic does not guarantee a checkpoint token limit; calibrate the sidecar and
+threshold against your traffic before deployment. See [ADR 0016](docs/adr/0016-semantic-policy-adapter.md).
