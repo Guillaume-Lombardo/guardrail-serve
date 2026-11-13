@@ -124,3 +124,35 @@ func TestDegradedGateProcess(t *testing.T) {
 		t.Error(violation)
 	}
 }
+
+func TestCheckFloors(t *testing.T) {
+	// fixture: fr recall 1/2 and no fr negatives; en has one true negative.
+	c, s := fixture()
+	floor := func(lang string, recall, fpr float64) []Floor {
+		return []Floor{{Detector: "detect_secret", Lang: lang, MinRecall: recall, MaxFPR: fpr}}
+	}
+	for _, tc := range []struct {
+		name   string
+		floors []Floor
+		mutate func()
+		want   []string
+	}{
+		{"recall at floor", floor("all", 0.5, 0), nil, []string{}},
+		{"recall below floor", floor("all", 0.85, 0.05), nil, []string{"floor recall missed: detect_secret/all 0.500000 < 0.850000"}},
+		{"fpr above floor", floor("all", 0, 0.05), func() { s.Outcomes["negative"]["detect_secret"] = true }, []string{"floor fpr exceeded: detect_secret/all 1.000000 > 0.050000"}},
+		{"undefined fpr fails", floor("fr", 0, 0.05), nil, []string{"floor fpr undefined: detect_secret/fr"}},
+		{"undefined recall fails", floor("en", 0, 1), nil, []string{"floor recall undefined: detect_secret/en"}},
+		{"missing group fails", floor("de", 0, 1), nil, []string{"floor group missing: detect_secret/de"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, s = fixture()
+			if tc.mutate != nil {
+				tc.mutate()
+			}
+			refresh(s, c)
+			if got := CheckFloors(s, tc.floors); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
