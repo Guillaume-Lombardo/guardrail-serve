@@ -173,14 +173,38 @@ Status: validated by Guillaume; delivery in serialized merges after parallel wav
 - Wave 3: L4 French normalization/PII; L5 native secrets entropy/gitleaks.
 - Wave 4: L6 optional HTTP classifier; L7 offline evaluation; L8 container metrics.
 
-- [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment.
-- [x] L2: Runtime and authentication.
-- [x] L3: Policy engine and findings.
+- [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment (merged, PR #4).
+- [x] L2: Runtime and authentication (merged, PR #5).
+- [x] L3: Policy engine and findings (merged, PR #8).
 - [ ] L4: French normalization and PII.
 - [ ] L5: Native secrets with entropy/gitleaks.
 - [ ] L6: Optional HTTP classifier.
 - [ ] L7: Offline evaluation.
 - [ ] L8: Container and metrics.
+
+Corrective lots C1 (prompt-injection response scope, PR #6) and C2 (runtime resource bounds,
+PR #7) are merged. Main is at `5368afc` (L3).
+
+### Validated split of the remaining lots (a / b)
+
+Lots L4 to L8 are each split in two so that independent cores can be built in parallel and
+merged one at a time:
+
+- **a**: independent core in new packages (or new files) with unit tests and a local README or
+  ADR when structural. No policy, API or environment wiring, no runtime registration.
+- **b**: wiring PR that registers the core in the policy catalog, API and environment contract,
+  with integration and end-to-end tests, `.env.template` and root README updates.
+
+| Lot | a | b |
+| --- | --- | --- |
+| L4 | French normalization and PII core (owns `golang.org/x/text` in `go.mod`/`go.sum`) | policy/API/env wiring |
+| L5 | Native secrets core: entropy and gitleaks-style rules (security review required) | policy/API/env wiring |
+| L6 | Optional HTTP classifier core | policy/API/env wiring |
+| L7 | Offline evaluation core | evaluation CI workflow and wiring |
+| L8 | Container image and CI build (delivered, see below) | Metrics, engine and runtime changes |
+
+`plan.md` and the root `README.md` are updated only by the lot designated for it (L8a for the
+plan split and statuses) to avoid merge conflicts between parallel cores.
 
 L1 scope: transport DTOs, dedicated contract tests and route documentation. No runtime,
 authentication, configuration, maximum-length implementation or production changes.
@@ -264,3 +288,114 @@ Delivered:
   end-to-end tests (policy route, LiteLLM policy selection, OpenAPI, logs, auth
   and body limits on the new route).
 - Environment: `LITELLM_DEFAULT_POLICY` added to `.env.template` and local `.env`.
+
+## L8a — Container image
+
+Scope (validated split of L8): `Dockerfile`, `.dockerignore`, a build-only
+`.github/workflows/container.yml`, a root README `Container` section and
+`docs/adr/0012-container-image.md`. No Go code, metrics, engine or runtime change.
+
+Delivered:
+- Multi-stage build: official `golang` Alpine image matching `go.mod` and a
+  `gcr.io/distroless/static-debian13:nonroot` runtime, both pinned by tag and digest.
+  `CGO_ENABLED=0`, `-trimpath`, static binary, exec-form `ENTRYPOINT`, uid `65532`.
+- Port, configuration, health probe and signal handling documented in the README; no
+  `HEALTHCHECK` instruction (no probe binary in distroless).
+- CI builds the image on pull requests with `contents: read`, no push and no registry login, and
+  checks that the build image matches the `go` directive.
+- Evidence: image build through `heavy` on `codex-dev`; smoke test on a loopback port with
+  `GET /health/` returning 200, `POST /scan/secrets` and `/scan/prompt-injection` returning JSON
+  decisions, non-root process, statically linked binary, CA bundle present and `docker stop`
+  exiting 0 in about 0.25 s (graceful `SIGTERM`).
+- ADR: `docs/adr/0012-container-image.md`. No environment contract change.
+- Remaining for L8b: metrics, engine and runtime changes.
+
+## L4b — Normalized French guardrails
+
+Validated scope: integrate L4a normalization and validators in PII/injection
+only, preserve original byte/rune spans and graphemes, add French hostile
+instruction rules and correct shed/checksum/version/card-space false positives.
+No secrets-core, HTTP classifier, Docker, dependency or transport/admission work.
+
+Implementation:
+- Shared detector normalizes PII/injection and maps matches with OriginalBytes.
+- Explicit YAML checksum validators; contextual French NIR/SIREN/SIRET types.
+- Invalid UTF-8 and replacement characters fail closed (ADR 0013).
+- Regression tests were run failing first for all reported bugs; unit fixtures,
+  override integration tests, and v1/scan/LiteLLM input/output journeys cover
+  original findings, typed masks, detect/annotate and checksums.
+- Golden compatibility differs only by removal of the broad tool-listing false
+  positive. Environment files unchanged: no new environment contract.
+## L8b — Prometheus metrics
+
+Validated scope: per-handler injectable registry, authenticated `/metrics` on the
+existing listener; minimal transport-independent engine observer for real policy,
+limit and per-text detector executions, including clean and error outcomes.
+Bound labels to loaded policy/detector names and enums. Preserve API/runtime
+contracts. No L4b regex/YAML, L5/L6 wiring, evaluation workflow or archive changes.
+Deliver adapter, unit/integration/end-to-end tests, Docker smoke and ADR 0014.
+
+Delivered:
+- Value-only optional engine observer; actual policy, payload-limit and per-text
+  detector completions, with clean/match/error outcomes and duration.
+- Per-handler private/injectable Prometheus registry and authenticated/admitted
+  `/metrics`; catalog/enum label allowlists, no scrape instrumentation or globals.
+- Unit, integration and real HTTP end-to-end metrics tests; all suites, vet,
+  focused race tests and pre-commit pass through `heavy` on codex-dev.
+- Existing Dockerfile builds unchanged; nonroot uid 65532, read-only/cap-drop
+  smoke validates a secret scan, redaction, 401 without a key and authenticated
+  metrics containing the actual intervention but no matched value. Session
+  container removed after the smoke; no image published.
+- Independent review: initial APPROVE, rebase recheck and final confirmation;
+  three rounds total, final APPROVE with no open findings.
+- No environment contract change; no archive, regex/YAML or other-lot changes.
+
+## L7b — Offline evaluation regression gate
+
+Validated scope, base f3950e90e22a3e8bcb20443ae33f16591d618a13:
+- Reuse L7a's HTTP runner and immutable 83-case original FR/EN corpus.
+- Pin measured counts/precision/recall/FPR by detector and language, explicit
+  undefined ratios, and every case outcome; retain the 17 known FP/FN labels.
+- Require nondecreasing precision/recall and nonincreasing FPR plus protection
+  of each previously correct case; explicit refresh must pass the old gate.
+- Separate Evaluation workflow, ephemeral loopback real handler, no datasets,
+  models, LLM calls or evaluation-time downloads. Text-free JSON artifacts.
+- Comparator tests, compensated-regression test and subprocess proof that an
+  injected HTTP degradation exits nonzero. ADR 0015 and README Evaluation.
+- No detector, domain, service config, dependency or environment contract change.
+
+Implementation and local proof recorded in the L7b PR. CI/review delivery status
+is authoritative on that PR; leave open and unmerged for full-stop handoff.
+
+## C3 — Invalid-text error contract documentation
+
+Validated scope: align the README and ADR 0013 with the existing HTTP 502
+contract (ADR 0007), without runtime, detector, dependency, CI or environment
+changes. JSON decoding repairs malformed UTF-8 and unpaired UTF-16 surrogates
+to U+FFFD; the existing rejection of literal U+FFFD remains unchanged.
+
+Evidence and regression coverage:
+- Reproduced the documented HTTP 500 expectation against the unchanged runtime:
+  all 24 route/input combinations returned 502 instead (documentation defect).
+- Strengthened the existing end-to-end test to require 502, JSON content type,
+  and exactly `{"detail":"Guardrail execution failed."}` with no sensitive or
+  partial results. Six inputs across four routes retain the prior cases and add
+  the isolated surrogate: the 12 core malformed-UTF-8/surrogate/literal-U+FFFD
+  cases are included.
+- Exact 502 regression assertions pass on the existing implementation; they
+  were not failing runtime tests before this documentation correction.
+- No new architecture decision or environment/configuration contract.
+
+## L6b — Optional semantic policy adapter
+
+Validated scope: reuse L6a HTTP classifier behind a per-text domain detector,
+optional static operator configuration, explicit input/output policy chains,
+whole-original-text findings and fixed safe explanations. No changes to L4b,
+L5b, evaluation CLI/fixtures or default policies. No external model execution.
+
+Implementation: app-only composition, strict config validation without I/O,
+disabled detector startup rejection, safe fail-open structured warning and
+unchanged fail-closed 502/LiteLLM contracts. Preserve L8b observer and runtime auth.
+ADR 0016, env template and local env synchronized; optional Compose wiring
+requires an operator-supplied compatible sidecar (stock TEI mDeBERTa unverified).
+Validation and independent review evidence recorded in the delivery PR.

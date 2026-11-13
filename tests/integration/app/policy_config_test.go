@@ -104,3 +104,12 @@ func TestEmbeddedCatalogKeepsLegacyLiteLLMNames(t *testing.T) {
 		}
 	}
 }
+
+func TestDisabledSemanticPolicyFailsStartup(t *testing.T) {
+	dir := t.TempDir()
+	writeOverride(t, dir, "policies.yaml", strings.ReplaceAll(overridePolicies, "detect_pii", "semantic_prompt_injection"))
+	_, err := app.NewHandler(policyConfig(dir, "tenant-a"))
+	if err == nil || !strings.Contains(err.Error(), `unknown detector "semantic_prompt_injection"`) {
+		t.Fatalf("disabled detector: %v", err)
+	}
+}

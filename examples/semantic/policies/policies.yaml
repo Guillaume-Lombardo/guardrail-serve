@@ -1,0 +1,26 @@
+version: 1
+policies:
+  - name: semantic
+    mode: enforce
+    stages:
+      input:
+        - detector: prompt_injection
+          action: block
+        - detector: semantic_prompt_injection
+          action: block
+      output:
+        - detector: prompt_injection
+          action: annotate
+        - detector: semantic_prompt_injection
+          action: annotate
+  - name: semantic-audit
+    mode: detect
+    stages:
+      input:
+        - detector: prompt_injection
+          action: block
+        - detector: semantic_prompt_injection
+          action: block
+      output:
+        - detector: semantic_prompt_injection
+          action: annotate

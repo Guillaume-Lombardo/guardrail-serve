@@ -223,6 +223,41 @@ Multiple credential headers, including using both header forms, are rejected wit
 set, and never included in authentication errors or logs. Use TLS at the ingress
 and provide keys through the environment, never a committed configuration file.
 
+## Container
+
+The repository ships a multi-stage `Dockerfile` that builds a small, static, non-root image
+(see `docs/adr/0012-container-image.md`).
+
+```bash
+docker build -t guardrail-serve .
+docker run --rm -p 127.0.0.1:8000:8000 guardrail-serve
+curl http://127.0.0.1:8000/health/
+```
+
+- **Build**: Go toolchain image pinned by tag and digest (it must match the `go` directive of
+  `go.mod`), `CGO_ENABLED=0`, `-trimpath -buildvcs=false -ldflags="-s -w"`. The default policies and
+  patterns are embedded in the binary, so no resource file is copied separately.
+- **Runtime**: `gcr.io/distroless/static-debian13:nonroot` (pinned by digest) with CA certificates,
+  no shell and no package manager. The process runs as `65532:65532` from the read-only, root-owned
+  `/app/guardrail-serve` and writes nothing to disk.
+- **Port**: the service listens on `API_PORT` (default `8000`, `EXPOSE 8000`). Publish it on the
+  interface you intend to serve; keep `GUARDRAIL_API_KEYS` set when it is reachable by others.
+- **Configuration**: every setting described in [Runtime configuration](#runtime-configuration)
+  is an environment variable (`docker run -e LOG_FORMAT=json -e GUARDRAIL_API_KEYS=...`).
+  `GUARDRAILS_CONFIG_DIR` must point to a directory mounted into the container and readable by
+  uid `65532` (for example `-v ./config:/config:ro -e GUARDRAILS_CONFIG_DIR=/config`). Pass secrets
+  through the orchestrator's secret mechanism, never bake them into the image.
+- **Health**: `GET <API_PREFIX>/health/` returns `200 {"status":"ok"}` and is exempt from API-key
+  authentication. The image has no `HEALTHCHECK` instruction because it contains no shell or curl:
+  configure the probe in the orchestrator (Kubernetes `httpGet`, load balancer check, or an HTTP
+  probe from a sidecar or auxiliary container).
+- **Signals**: the binary is PID 1 through an exec-form `ENTRYPOINT` and handles `SIGTERM` and
+  `SIGINT` itself: it stops accepting connections and drains requests for up to
+  `HTTP_SHUTDOWN_TIMEOUT` (default `10s`). Set the orchestrator's stop grace period above that value
+  (`docker stop -t 15`).
+- **CI**: `.github/workflows/container.yml` builds the image on pull requests without pushing it;
+  it needs no registry credentials. Publishing is out of scope for now.
+
 ## Logging
 
 Logging uses the Go stdlib `log/slog` stack.
@@ -266,3 +301,197 @@ pre-commit run --all-files
 2. Create or connect the GitHub repository.
 3. Push the initial `main` branch.
 4. After bootstrap, do all further work on dedicated branches with PRs, CI, and review.
+
+### Normalized deterministic detection
+
+PII and prompt-injection rules scan an NFKC view with zero-width and bidi
+formatting controls removed. English and French hostile instruction overrides,
+system-prompt disclosure and hostile tool use are covered by deterministic
+patterns; ordinary requests such as “list the tools I need to build a shed”
+pass. These patterns are bounded heuristics, not a semantic safety guarantee.
+Secret detection is unchanged.
+
+Matches map back to the original bytes through `internal/textnorm`; API findings
+use original rune offsets. Masks replace whole original grapheme clusters.
+Ligature expansions can produce overlapping findings, merged deterministically
+by the policy engine. Clean text, detect-mode text and annotated text retain
+all original characters, including formatting and decomposed accents.
+
+PII rules accept an optional `validator` field: `payment_card`, `iban`, `fr_nir`,
+`fr_siren`, or `fr_siret`; unknown validators fail startup. Embedded card rules
+require Luhn (12–19 digits), IBAN rules require registered country format and
+MOD 97, and French identifiers use the shared NIR/SIREN/SIRET validators.
+NIR/SIREN/SIRET require their contextual labels (NIR also accepts “sécurité
+sociale” and “numéro de sécurité sociale”) to avoid treating arbitrary numeric
+sequences as identifiers. A labeled French identifier is not also treated as a
+payment card. ASCII spaces/hyphens may separate identifier characters; NFKC
+also accepts compatibility spaces and digits. Invalid checksums are discarded.
+IPv4 literals remain detectable, except immediately after `version`, `release`,
+`ver`, or `v` with optional spacing and `:`, `=`, `-` separators. Card matches
+end at the last digit and preserve following spaces.
+
+PII/injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
+error, before returning any detections. JSON decoding replaces malformed UTF-8
+and unpaired UTF-16 surrogates with U+FFFD; these decoded texts therefore also
+fail closed through the existing detector-error HTTP 502 response, with the stable
+JSON detail
+`Guardrail execution failed.` and no texts, findings or input values
+([ADR 0007](docs/adr/0007-policy-engine-and-findings.md)). Literal U+FFFD is
+deliberately rejected too: after decoding,
+it cannot be distinguished from damaged input. Offsets always refer to valid
+original UTF-8, never to a repaired string. Policies that do not run either
+detector retain their existing behavior. No admission/body/rune limit changes.
+See [ADR 0013](docs/adr/0013-normalized-detector-integration.md).
+## Prometheus metrics
+
+`GET /metrics` on the API listener (prefixed by `API_PREFIX`, if configured)
+exports Prometheus text metrics using `client_golang`. No extra port or environment
+variable is required. When API keys are configured, scrapes require the same
+`Authorization: Bearer ...` or `X-API-Key` header as scans. Only health is exempt
+from authentication and admission. Scrapes consume admission capacity and retain
+body limits and HTTP timeouts, so they can return 401, 413 or 503 under the same
+conditions as other requests. Configure the scraper's credentials accordingly.
+
+| Metric | Meaning |
+| --- | --- |
+| `guardrail_executions_total` | Completed policy evaluations and actual detector invocations |
+| `guardrail_execution_duration_seconds` | Duration histogram for those same executions, in seconds (default Prometheus buckets) |
+
+Both use labels `policy`, `mode`, `stage`, `detector`, `action`, `decision` and
+`outcome`. `detector="none"` identifies a complete policy evaluation; its
+`action="none"` and `decision` is the applied `NONE`, `BLOCKED` or
+`GUARDRAIL_INTERVENED` (`none` on error). Detector series have `decision="none"`,
+configured action `mask`, `block` or `annotate`, and count once per text and chain
+step. `max_length` counts once per evaluation with action `block`; when it blocks,
+no chain detectors run. Outcomes are `clean`, `match` and `error`. A matching
+annotate/detect execution still reports a policy decision of `NONE`. These are
+execution counts, not numbers of findings or HTTP requests. Earlier successful
+steps remain counted if a later step fails. Cancellation and invalid spans are
+errors when returned by the executed detector. Policy latency includes limits,
+detectors and output processing; detector latency includes span validation.
+
+Each handler owns a fresh registry. Embedders can inject a caller-owned registry
+with `app.NewHandlerWithRegistry`; duplicate registrations return an error. No
+Prometheus global registry, process/Go collectors or scrape metrics are installed.
+Counters start when an execution completes, so unused series are absent. Health,
+scrapes, authentication/admission rejections, validation failures and unknown
+policies create no execution samples. This also prevents recursive scrape metrics.
+
+Policy and detector labels are bounded by the startup catalog and fixed scan
+policies; other labels are enums. Unexpected observer values collapse to
+`unknown`. No request text, matches, extracted rules/types, keys, request IDs,
+raw URLs or unknown user-selected policy names become labels. Cardinality grows
+only with operator-loaded policies and detector chains. See
+[ADR 0014](docs/adr/0014-prometheus-observation.md).
+
+## Evaluation
+
+Run the versioned FR/EN offline regression gate from the repository root:
+
+```sh
+scripts/eval-offline.sh
+```
+
+Provision the Go toolchain specified in `go.mod` and modules first (`go mod download`).
+Evaluation itself disables Go downloads, uses the real service over an ephemeral
+loopback HTTP listener, and requires no datasets, models, LLM, API key or `.env`.
+The separate Evaluation workflow uploads `.agent-tmp/eval/{current,gate}.json`.
+A request failure or regression produces a nonzero test/process exit status.
+
+The [baseline](tests/eval/baseline/original-v1.json) records measurements at
+`f3950e90e22a3e8bcb20443ae33f16591d618a13` for the unchanged 83-case original
+corpus. All known false positives/negatives remain visible by case ID. Metrics
+below are rounded for readability; gates use full precision.
+
+| Detector | Language | TP | FP | TN | FN | Precision | Recall | FPR |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| detect_pii | en | 8 | 2 | 34 | 0 | .800000 | 1 | .055556 |
+| detect_pii | fr | 5 | 2 | 31 | 0 | .714286 | 1 | .060606 |
+| detect_secret | en | 8 | 3 | 32 | 1 | .727273 | .888889 | .085714 |
+| detect_secret | fr | 7 | 2 | 29 | 1 | .777778 | .875000 | .064516 |
+| prompt_injection | en | 5 | 1 | 36 | 2 | .833333 | .714286 | .027027 |
+| prompt_injection | fr | 3 | 0 | 33 | 3 | 1 | .500000 | 0 |
+
+For every detector total and detector/language group, precision/recall must be
+at least baseline and FPR at most baseline. Every previously correct case label
+must remain correct: an improvement cannot compensate for a regression elsewhere.
+Zero-denominator metrics use `defined: false` (no numeric bound); a previously
+defined metric must remain defined. Corpora are never pooled.
+
+To refresh after an improvement, run the old gate first, then:
+
+```sh
+GOPROXY=off GOTOOLCHAIN=local go test ./tests/eval \
+  -run '^TestOfflineRegressionGate$' -count=1 -update-eval-baseline
+```
+
+The refresh refuses regressions against the old baseline. Review and commit the
+old/new metrics and corrected case IDs as evidence; do not relax thresholds or
+edit corpus labels to get a pass. See [ADR 0015](docs/adr/0015-offline-regression-gate.md)
+and the [evaluation CLI documentation](cmd/guardrail-eval/README.md).
+
+### Optional semantic policy detector (L6b)
+
+`semantic_prompt_injection` supports input and output policy stages. It is disabled
+by default; embedded policies and legacy `/scan` behavior are unchanged. Enable
+it explicitly and install [example policies](examples/semantic/policies/policies.yaml)
+via `GUARDRAILS_CONFIG_DIR`; set `LITELLM_DEFAULT_POLICY=semantic` if appropriate.
+A policy naming this detector while disabled fails startup as an unknown detector.
+
+| Environment | Default | Contract |
+| --- | --- | --- |
+| `SEMANTIC_ENABLED` | `false` | Boolean; register optional detector |
+| `SEMANTIC_URL` | empty | Required when enabled; static absolute HTTP(S) endpoint, no credentials/fragment |
+| `SEMANTIC_FORMAT` | `scores` | `scores` or `tei_predict` |
+| `SEMANTIC_TIMEOUT` | `2s` | Positive duration for one text, including all chunk batches |
+| `SEMANTIC_THRESHOLD` | `0.9` | Finite score in (0,1]; equality triggers |
+| `SEMANTIC_FAILURE_MODE` | `closed` | `open` or `closed` |
+| `SEMANTIC_MALICIOUS_LABELS` | `MALICIOUS` | Nonempty comma-separated TEI labels, case-insensitive |
+
+These settings are operator-only. Request metadata, forwarded headers and provider
+params never select URLs, credentials or thresholds. No sidecar auth forwarding
+is implemented. Config parsing/handler construction makes no network calls.
+
+For `scores`, POST `{"texts":["sample"]}` to the configured URL and return
+`{"scores":[0.92]}` (one finite attack probability per item in original order).
+For `tei_predict`, configure the full `/predict` URL; requests use
+`{"inputs":[["sample"]],"raw_scores":false,"truncate":false}` and responses use
+`[[{"label":"BENIGN","score":0.08},{"label":"MALICIOUS","score":0.92}]]`.
+Use labels from the actual checkpoint's id2label mapping, not guessed label IDs.
+The [L6a client contract](internal/semantic/httpclassifier/README.md) documents
+chunk/batch/response bounds and invalid-response behavior. Classification emits
+one finding per triggered original text, with its maximum score and whole-text
+rune span, fixed type `PROMPT_INJECTION` and rule `semantic_classification`.
+It cannot locate the malicious fragment. Enforce/block blocks; annotate reports
+findings without intervention; detect mode reports hypothetical actions unchanged.
+
+Fail-closed provider errors return **502** `{"detail":"Guardrail execution failed."}`
+without URLs, text, response bodies or secrets. Configure LiteLLM's own fail-closed
+handling to block on provider errors. Fail-open can return `NONE`; each degraded
+text evaluation emits a structured warning `semantic classifier degraded` with
+fixed `detector` and `failure_mode` fields. Alert on that warning. L8b detector
+metrics still record clean/match/error; fail-open counts as clean and requires the
+warning to distinguish unavailable classification. Caller cancellation is never
+converted to a successful fail-open result. LiteLLM responses keep exactly the
+existing `action`, optional `blocked_reason`, and `texts` contract; no metadata is
+added. Native v1 findings include the score and correct `text_index`.
+
+[Compose example](examples/semantic/compose.yaml) wires the service to an external
+sidecar on `classifier:8080/classify`. Set `SEMANTIC_SIDECAR_IMAGE` to your compatible
+image (prefer an immutable digest). The example deliberately supplies no model
+image and is not a verified model deployment. Build/Compose validation belongs on
+the designated build host; it was not run on docker-box for this change.
+
+Prompt Guard 2 offers 22M/86M checkpoints; Meta describes its mDeBERTa basis and
+Llama 4 license in the [primary implementation documentation](https://github.com/meta-llama/PurpleLlama/blob/main/Llama-Prompt-Guard-2/README.md).
+Check the [22M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M)
+and [86M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
+for access, label mapping, license and use restrictions before downloading.
+Nominal FP32 weights alone are roughly 88/344 MB; runtime memory and tokenization
+add overhead. Checkpoints are not bundled. The [TEI supported architectures](https://huggingface.co/docs/text-embeddings-inference/supported_models)
+do not list mDeBERTa: a TEI `/predict` wire format does **not** establish Prompt Guard
+compatibility with a stock TEI image. Supply a compatible external server or a
+validated custom implementation; no Python runtime, CGO, model or provider is
+required by the Go service or its fixed-fixture/httptest suites. The rune chunk
+heuristic does not guarantee a checkpoint token limit; calibrate the sidecar and
+threshold against your traffic before deployment. See [ADR 0016](docs/adr/0016-semantic-policy-adapter.md).

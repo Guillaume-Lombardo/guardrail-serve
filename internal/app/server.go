@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/g1lom/guardrail-serve/internal/config"
 	"github.com/g1lom/guardrail-serve/internal/domain"
 	"github.com/g1lom/guardrail-serve/internal/guardrails"
@@ -44,6 +46,11 @@ func NewHandler(cfg config.Config) (http.Handler, error) {
 }
 
 func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler, error) {
+	return NewHandlerWithRegistry(cfg, logger, nil)
+}
+
+// NewHandlerWithRegistry uses a caller-owned registry, or creates a fresh one.
+func NewHandlerWithRegistry(cfg config.Config, logger *slog.Logger, registry *prometheus.Registry) (http.Handler, error) {
 	cfg.Runtime = cfg.Runtime.Defaults()
 	if err := cfg.Runtime.Validate(); err != nil {
 		return nil, err
@@ -75,6 +82,18 @@ func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler,
 	}
 	detectors := map[string]domain.Detector{secret.Name(): secret, pii.Name(): pii, prompt.Name(): prompt}
 
+	classifier, err := cfg.Semantic.NewClassifier()
+	if err != nil {
+		return nil, fmt.Errorf("semantic detector configuration: %w", err)
+	}
+	if classifier != nil {
+		detector, err := guardrails.NewSemanticPolicyDetector(classifier, logger)
+		if err != nil {
+			return nil, err
+		}
+		detectors[detector.Name()] = detector
+	}
+
 	defaultMask := policy.LiteralMask(cfg.SecretMask)
 	content, source, err := resources.LoadPolicies(cfg.GuardrailsConfigDir)
 	if err != nil {
@@ -96,11 +115,21 @@ func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler,
 		return nil, err
 	}
 
-	engine := policy.NewEngine(guardrails.NewMaxLengthGuardrail(cfg.MaxTextItems, cfg.MaxTextChars))
+	names := append(catalog.Names(), scan.Secrets.Name, scan.PII.Name, scan.PromptInjection.Name)
+	detectorNames := []string{"max_length"}
+	for name := range detectors {
+		detectorNames = append(detectorNames, name)
+	}
+	metrics, err := observability.NewMetrics(registry, names, detectorNames)
+	if err != nil {
+		return nil, fmt.Errorf("register metrics: %w", err)
+	}
+	engine := policy.NewEngineWithObserver(guardrails.NewMaxLengthGuardrail(cfg.MaxTextItems, cfg.MaxTextChars), metrics)
 	apiHandler := httpapi.NewHandler(cfg, logger, engine, catalog, scan)
 
 	mux := http.NewServeMux()
 	apiHandler.Register(mux)
+	mux.Handle("GET "+cfg.APIPrefix+"/metrics", metrics)
 	return runtimeHandler(cfg, apiHandler.WithObservability(mux)), nil
 }
 
