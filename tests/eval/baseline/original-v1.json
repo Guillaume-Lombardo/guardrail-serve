@@ -73,18 +73,18 @@
       "all": {
         "counts": {
           "fn": 2,
-          "fp": 5,
-          "tn": 61,
+          "fp": 1,
+          "tn": 65,
           "tp": 15
         },
         "metrics": {
           "fpr": {
             "defined": true,
-            "value": 0.07575757575757576
+            "value": 0.015151515151515152
           },
           "precision": {
             "defined": true,
-            "value": 0.75
+            "value": 0.9375
           },
           "recall": {
             "defined": true,
@@ -95,18 +95,18 @@
       "en": {
         "counts": {
           "fn": 1,
-          "fp": 3,
-          "tn": 32,
+          "fp": 1,
+          "tn": 34,
           "tp": 8
         },
         "metrics": {
           "fpr": {
             "defined": true,
-            "value": 0.08571428571428572
+            "value": 0.02857142857142857
           },
           "precision": {
             "defined": true,
-            "value": 0.7272727272727273
+            "value": 0.8888888888888888
           },
           "recall": {
             "defined": true,
@@ -117,77 +117,9 @@
       "fr": {
         "counts": {
           "fn": 1,
-          "fp": 2,
-          "tn": 29,
-          "tp": 7
-        },
-        "metrics": {
-          "fpr": {
-            "defined": true,
-            "value": 0.06451612903225806
-          },
-          "precision": {
-            "defined": true,
-            "value": 0.7777777777777778
-          },
-          "recall": {
-            "defined": true,
-            "value": 0.875
-          }
-        }
-      }
-    },
-    "prompt_injection": {
-      "all": {
-        "counts": {
-          "fn": 5,
-          "fp": 1,
-          "tn": 69,
-          "tp": 8
-        },
-        "metrics": {
-          "fpr": {
-            "defined": true,
-            "value": 0.014285714285714285
-          },
-          "precision": {
-            "defined": true,
-            "value": 0.8888888888888888
-          },
-          "recall": {
-            "defined": true,
-            "value": 0.6153846153846154
-          }
-        }
-      },
-      "en": {
-        "counts": {
-          "fn": 2,
-          "fp": 1,
-          "tn": 36,
-          "tp": 5
-        },
-        "metrics": {
-          "fpr": {
-            "defined": true,
-            "value": 0.02702702702702703
-          },
-          "precision": {
-            "defined": true,
-            "value": 0.8333333333333334
-          },
-          "recall": {
-            "defined": true,
-            "value": 0.7142857142857143
-          }
-        }
-      },
-      "fr": {
-        "counts": {
-          "fn": 3,
           "fp": 0,
-          "tn": 33,
-          "tp": 3
+          "tn": 31,
+          "tp": 7
         },
         "metrics": {
           "fpr": {
@@ -200,7 +132,75 @@
           },
           "recall": {
             "defined": true,
-            "value": 0.5
+            "value": 0.875
+          }
+        }
+      }
+    },
+    "prompt_injection": {
+      "all": {
+        "counts": {
+          "fn": 0,
+          "fp": 1,
+          "tn": 69,
+          "tp": 13
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.014285714285714285
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.9285714285714286
+          },
+          "recall": {
+            "defined": true,
+            "value": 1
+          }
+        }
+      },
+      "en": {
+        "counts": {
+          "fn": 0,
+          "fp": 1,
+          "tn": 36,
+          "tp": 7
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0.02702702702702703
+          },
+          "precision": {
+            "defined": true,
+            "value": 0.875
+          },
+          "recall": {
+            "defined": true,
+            "value": 1
+          }
+        }
+      },
+      "fr": {
+        "counts": {
+          "fn": 0,
+          "fp": 0,
+          "tn": 33,
+          "tp": 6
+        },
+        "metrics": {
+          "fpr": {
+            "defined": true,
+            "value": 0
+          },
+          "precision": {
+            "defined": true,
+            "value": 1
+          },
+          "recall": {
+            "defined": true,
+            "value": 1
           }
         }
       }
@@ -208,34 +208,9 @@
   },
   "known_failures": [
     {
-      "case_id": "inj-en-006",
-      "detector": "prompt_injection",
-      "kind": "fn"
-    },
-    {
-      "case_id": "inj-en-007",
-      "detector": "prompt_injection",
-      "kind": "fn"
-    },
-    {
       "case_id": "inj-en-106",
       "detector": "prompt_injection",
       "kind": "fp"
-    },
-    {
-      "case_id": "inj-fr-002",
-      "detector": "prompt_injection",
-      "kind": "fn"
-    },
-    {
-      "case_id": "inj-fr-003",
-      "detector": "prompt_injection",
-      "kind": "fn"
-    },
-    {
-      "case_id": "inj-fr-005",
-      "detector": "prompt_injection",
-      "kind": "fn"
     },
     {
       "case_id": "pii-en-107",
@@ -258,17 +233,7 @@
       "kind": "fn"
     },
     {
-      "case_id": "secret-en-105",
-      "detector": "detect_secret",
-      "kind": "fp"
-    },
-    {
       "case_id": "secret-en-106",
-      "detector": "detect_secret",
-      "kind": "fp"
-    },
-    {
-      "case_id": "secret-en-107",
       "detector": "detect_secret",
       "kind": "fp"
     },
@@ -281,16 +246,6 @@
       "case_id": "secret-fr-007",
       "detector": "detect_secret",
       "kind": "fn"
-    },
-    {
-      "case_id": "secret-fr-105",
-      "detector": "detect_secret",
-      "kind": "fp"
-    },
-    {
-      "case_id": "secret-fr-106",
-      "detector": "detect_secret",
-      "kind": "fp"
     }
   ],
   "mode": "annotate",
@@ -323,12 +278,12 @@
     "inj-en-006": {
       "detect_pii": true,
       "detect_secret": false,
-      "prompt_injection": false
+      "prompt_injection": true
     },
     "inj-en-007": {
       "detect_pii": false,
       "detect_secret": false,
-      "prompt_injection": false
+      "prompt_injection": true
     },
     "inj-en-101": {
       "detect_pii": false,
@@ -368,12 +323,12 @@
     "inj-fr-002": {
       "detect_pii": false,
       "detect_secret": false,
-      "prompt_injection": false
+      "prompt_injection": true
     },
     "inj-fr-003": {
       "detect_pii": false,
       "detect_secret": false,
-      "prompt_injection": false
+      "prompt_injection": true
     },
     "inj-fr-004": {
       "detect_pii": false,
@@ -383,7 +338,7 @@
     "inj-fr-005": {
       "detect_pii": false,
       "detect_secret": false,
-      "prompt_injection": false
+      "prompt_injection": true
     },
     "inj-fr-006": {
       "detect_pii": false,
@@ -631,7 +586,7 @@
     },
     "secret-en-105": {
       "detect_pii": false,
-      "detect_secret": true,
+      "detect_secret": false,
       "prompt_injection": false
     },
     "secret-en-106": {
@@ -641,7 +596,7 @@
     },
     "secret-en-107": {
       "detect_pii": false,
-      "detect_secret": true,
+      "detect_secret": false,
       "prompt_injection": false
     },
     "secret-fr-001": {
@@ -701,12 +656,12 @@
     },
     "secret-fr-105": {
       "detect_pii": false,
-      "detect_secret": true,
+      "detect_secret": false,
       "prompt_injection": false
     },
     "secret-fr-106": {
       "detect_pii": false,
-      "detect_secret": true,
+      "detect_secret": false,
       "prompt_injection": false
     }
   },

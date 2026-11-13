@@ -14,11 +14,17 @@ import (
 
 // NamedPattern is one YAML rule. Type labels findings (and typed masks); when
 // empty, the detector's default type applies.
+//
+// Channel and ExemptQuotedAnalysis are prompt_injection options (ADR 0018):
+// channel "folded" matches textnorm.Fold, and exempt_quoted_analysis ignores
+// folded matches inside a quotation that the rest of the text only analyses.
 type NamedPattern struct {
-	Name      string          `yaml:"name"`
-	Type      string          `yaml:"type"`
-	Regex     string          `yaml:"regex"`
-	Validator validators.Kind `yaml:"validator,omitempty"`
+	Name                 string          `yaml:"name"`
+	Type                 string          `yaml:"type"`
+	Regex                string          `yaml:"regex"`
+	Validator            validators.Kind `yaml:"validator,omitempty"`
+	Channel              string          `yaml:"channel,omitempty"`
+	ExemptQuotedAnalysis bool            `yaml:"exempt_quoted_analysis,omitempty"`
 }
 
 var findingTypePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
@@ -29,7 +35,9 @@ type spanSelector int
 const (
 	// spanSecretGroup reports every non-empty capture group named "secret".
 	spanSecretGroup spanSelector = iota
-	// spanWholeMatch reports the whole non-empty match.
+	// spanWholeMatch reports the whole non-empty match, or every non-empty
+	// capture group named "match" when the rule has one (so a rule can require
+	// context, such as a clause start, without reporting it).
 	spanWholeMatch
 )
 
@@ -37,8 +45,10 @@ type compiledRule struct {
 	name      string
 	kind      string
 	regex     *regexp.Regexp
-	secrets   []int
+	groups    []int // reported capture groups; nil reports the whole match
 	validator validators.Kind
+	channel   MatchChannel
+	exempt    bool
 }
 
 // RegexDetector is the shared mechanism behind the deterministic detectors.
@@ -75,16 +85,28 @@ func newRegexDetector(name, defaultType, blockReason string, selector spanSelect
 				return nil, err
 			}
 		}
-		rule := compiledRule{name: pattern.Name, kind: kind, regex: re, validator: pattern.Validator}
+		channel, err := ParseMatchChannel(pattern.Channel)
+		if err != nil {
+			return nil, fmt.Errorf("%s pattern %d (%q): %w", name, index, pattern.Name, err)
+		}
+		if channel == ChannelFolded && name != "prompt_injection" {
+			return nil, fmt.Errorf("%s pattern %d (%q): channel %q requires prompt_injection", name, index, pattern.Name, channel)
+		}
+		if pattern.ExemptQuotedAnalysis && channel != ChannelFolded {
+			return nil, fmt.Errorf("%s pattern %d (%q): exempt_quoted_analysis requires channel %q", name, index, pattern.Name, ChannelFolded)
+		}
+		rule := compiledRule{name: pattern.Name, kind: kind, regex: re, validator: pattern.Validator, channel: channel, exempt: pattern.ExemptQuotedAnalysis}
+		groupName := "match"
 		if selector == spanSecretGroup {
-			for group, groupName := range re.SubexpNames() {
-				if group > 0 && groupName == "secret" {
-					rule.secrets = append(rule.secrets, group)
-				}
+			groupName = "secret"
+		}
+		for group, subexp := range re.SubexpNames() {
+			if group > 0 && subexp == groupName {
+				rule.groups = append(rule.groups, group)
 			}
-			if len(rule.secrets) == 0 {
-				return nil, fmt.Errorf("%s pattern %d (%q): a (?P<secret>...) group is required", name, index, pattern.Name)
-			}
+		}
+		if selector == spanSecretGroup && len(rule.groups) == 0 {
+			return nil, fmt.Errorf("%s pattern %d (%q): a (?P<secret>...) group is required", name, index, pattern.Name)
 		}
 		rules = append(rules, rule)
 	}
@@ -128,39 +150,59 @@ func (d *RegexDetector) Detect(ctx context.Context, text string) ([]domain.Detec
 		normalized = textnorm.Normalize(text)
 		text = normalized.Text()
 	}
-	add := func(rule compiledRule, start, end int) error {
+	// The folded view and its quoted mentions are computed once, on demand.
+	var folded *textnorm.Folded
+	var mentions []textnorm.Span
+	add := func(rule compiledRule, scanned string, start, end int) error {
 		if start < 0 || end <= start {
 			return nil
 		}
 		if d.name == "detect_pii" {
-			end = piiCandidateEnd(rule, text, start, end)
+			end = piiCandidateEnd(rule, scanned, start, end)
 			if end <= start {
 				return nil
 			}
 		}
-		if normalized != nil {
-			span, err := normalized.OriginalBytes(start, end)
-			if err != nil {
-				return fmt.Errorf("%s: original span: %w", d.name, err)
+		var span textnorm.Span
+		var err error
+		switch {
+		case rule.channel == ChannelFolded:
+			if rule.exempt && insideAny(mentions, start, end) {
+				return nil
 			}
-			start, end = span.Start, span.End
+			span, err = folded.OriginalBytes(start, end)
+		case normalized != nil:
+			span, err = normalized.OriginalBytes(start, end)
+		default:
+			span = textnorm.Span{Start: start, End: end}
 		}
-		detections = appendSpan(detections, rule, start, end)
+		if err != nil {
+			return fmt.Errorf("%s: original span: %w", d.name, err)
+		}
+		detections = appendSpan(detections, rule, span.Start, span.End)
 		return nil
 	}
 	for _, rule := range d.rules {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		for _, match := range rule.matches(text) {
-			if rule.secrets == nil {
-				if err := add(rule, match[0], match[1]); err != nil {
+		scanned := text
+		if rule.channel == ChannelFolded {
+			if folded == nil {
+				folded = normalized.Fold()
+				mentions = quotedMentions(folded)
+			}
+			scanned = folded.Text()
+		}
+		for _, match := range rule.matches(scanned) {
+			if rule.groups == nil {
+				if err := add(rule, scanned, match[0], match[1]); err != nil {
 					return nil, err
 				}
 				continue
 			}
-			for _, group := range rule.secrets {
-				if err := add(rule, match[2*group], match[2*group+1]); err != nil {
+			for _, group := range rule.groups {
+				if err := add(rule, scanned, match[2*group], match[2*group+1]); err != nil {
 					return nil, err
 				}
 			}
