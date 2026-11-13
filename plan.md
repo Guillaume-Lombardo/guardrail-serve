@@ -309,3 +309,20 @@ Delivered:
   exiting 0 in about 0.25 s (graceful `SIGTERM`).
 - ADR: `docs/adr/0012-container-image.md`. No environment contract change.
 - Remaining for L8b: metrics, engine and runtime changes.
+
+## L4b — Normalized French guardrails
+
+Validated scope: integrate L4a normalization and validators in PII/injection
+only, preserve original byte/rune spans and graphemes, add French hostile
+instruction rules and correct shed/checksum/version/card-space false positives.
+No secrets-core, HTTP classifier, Docker, dependency or transport/admission work.
+
+Implementation:
+- Shared detector normalizes PII/injection and maps matches with OriginalBytes.
+- Explicit YAML checksum validators; contextual French NIR/SIREN/SIRET types.
+- Invalid UTF-8 and replacement characters fail closed (ADR 0013).
+- Regression tests were run failing first for all reported bugs; unit fixtures,
+  override integration tests, and v1/scan/LiteLLM input/output journeys cover
+  original findings, typed masks, detect/annotate and checksums.
+- Golden compatibility differs only by removal of the broad tool-listing false
+  positive. Environment files unchanged: no new environment contract.
