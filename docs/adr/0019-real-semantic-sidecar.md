@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Validated with the real model on the build host; Compose and corpus quality remain pending (see "Validation status").
+Accepted. Validated with the real model on the build host, including French corpus quality (see `deploy/semantic-sidecar/EVALUATION.md`); the Compose stack at the final head remains pending (see "Validation status").
 
 ## Context
 
@@ -147,8 +147,14 @@ described under "Changes after validation".
   510-character chunk on 2 shared vCPUs, linear, inference serialized (figures in the
   sidecar README). English only.
 - **`integration_pending`**: the Compose stack (`up`, internal network, `depends_on`,
-  restart, graceful SIGTERM) and any corpus quality measure (recall, false-positive
-  rate), notably French. The default threshold `0.9` is unvalidated for any corpus.
+  restart, graceful SIGTERM) at the final head.
+- **French quality, measured** after L9 merged (`main` at `d756fc3`, threshold `0.9`
+  fixed beforehand, sequential, 3 repetitions; provenance and limits in
+  [`EVALUATION.md`](../../deploy/semantic-sidecar/EVALUATION.md)). On the 62-case
+  French injection corpus: deterministic 29 TP / 1 FP / 30 TN / 2 FN, semantic 30 / 27
+  / 4 / 1, both combined 31 / 27 / 4 / 0. On the French cases of the original corpus
+  the model adds 24 false positives and no true positive. Neither threshold nor corpus
+  was changed to hide this.
 - Timeout findings: with the Go default `SEMANTIC_TIMEOUT=2s` a 12 000-character text
   fails (502 in fail-closed mode); the earlier Compose default of `5s` fails at
   19 000 characters. `MAX_TEXT_CHARS=20000` needs at least 8-10 s at low load, more
@@ -173,9 +179,15 @@ stack on the build host.
 - Negative: a Python runtime and a large CPU image (3.03 GB measured, PyTorch plus
   baked weights) to operate; CPU latency for a base-size model exceeds the 2 s default
   client timeout above roughly 12 000 characters (measured), and serialized inference
-  makes latency grow with concurrency; the English-only default model cannot be
-  expected to detect French attacks, so it complements the deterministic
-  detector rather than replacing it.
+  makes latency grow with concurrency; the English-only default model flags
+  most French negatives (87.1% FPR at `0.9` on the French injection corpus) for two
+  extra true positives, so it must not be the French blocking detector. The
+  recommended operator policy is deterministic `block` plus semantic `annotate`; the
+  semantic detector stays disabled by default. An explicit semantic `block` remains
+  configurable, and it takes precedence over a secret `mask`, so texts that look like
+  credentials are blocked rather than redacted. This is a model limit, not an API
+  defect; a multilingual or French-tuned model would need the same evaluation with a
+  separately calibrated threshold.
 - Risks: the upstream default model is archived (no fixes); fail-open lets an
   attacker who can degrade the sidecar bypass the detector (default stays
   `closed`); amd64/CPython 3.13 only for the hash-locked wheels; Prompt Guard 2

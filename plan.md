@@ -495,9 +495,14 @@ the orchestrator.
   modes. Measured about 125 ms per 510-character chunk on 2 shared vCPUs, so
   `SEMANTIC_TIMEOUT` is sized per `MAX_TEXT_CHARS` (README).
 - [x] Root README Evaluation section synced with the merged L9 state.
+- [x] Real-model French evaluation (orchestrator run on `main` `d756fc3`, threshold
+  `0.9` fixed beforehand): on the French injection corpus deterministic
+  29/1/30/2, semantic 30/27/4/1, combined 31/27/4/0 (TP/FP/TN/FN); on the French
+  original cases the model adds 24 FP and no TP. Not suitable as a French blocking
+  detector. Recommendation: deterministic `block`, semantic `annotate`, semantic
+  disabled by default; the example policy and docs follow it. Summary in
+  `deploy/semantic-sidecar/EVALUATION.md`. No detector, rule, corpus, baseline or
+  threshold change.
 - [ ] `integration_pending`: the Compose stack with restart/SIGTERM revalidated
-  on the current head, and the semantic sidecar scored on the L9 corpora
-  (orchestrator-run real-model evaluation, separate from this PR; its report
-  may complete the documentation). No real-model quality or French-quality
-  claim is made before then.
+  on the final head (orchestrator, `codex-dev`).
 - [ ] PR CI and review of the final head: handed to the orchestrator.

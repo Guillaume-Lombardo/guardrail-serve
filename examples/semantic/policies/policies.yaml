@@ -1,6 +1,26 @@
 version: 1
 policies:
+  # Recommended: the deterministic detector blocks, the semantic detector only
+  # annotates. The default English model produces many false positives on French
+  # text and on texts containing credentials (deploy/semantic-sidecar/EVALUATION.md).
   - name: semantic
+    mode: enforce
+    stages:
+      input:
+        - detector: prompt_injection
+          action: block
+        - detector: semantic_prompt_injection
+          action: annotate
+      output:
+        - detector: prompt_injection
+          action: annotate
+        - detector: semantic_prompt_injection
+          action: annotate
+  # Explicit opt-in: the semantic detector blocks too. Expect false positives on
+  # French input and on texts with secrets or PII. A semantic block takes precedence
+  # over a secret mask in the same policy, so such texts are refused, not redacted.
+  # Use it only with a model and a threshold calibrated on your own traffic.
+  - name: semantic-block
     mode: enforce
     stages:
       input:
@@ -13,6 +33,7 @@ policies:
           action: annotate
         - detector: semantic_prompt_injection
           action: annotate
+  # Hypothetical decisions only (detect mode never intervenes), both detectors reported.
   - name: semantic-audit
     mode: detect
     stages:

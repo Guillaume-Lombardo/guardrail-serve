@@ -10,9 +10,11 @@ rationale: [ADR 0019](../../docs/adr/0019-real-semantic-sidecar.md).
 > `scores` contract, token limits, container hardening, the Go service against the
 > sidecar (fail-closed 502, fail-open warning) and the latencies below.
 > **`integration_pending`: the Compose stack** (`compose up`, the isolated network,
-> `depends_on`, restart and graceful SIGTERM) and **French or any corpus quality**
-> (recall, false-positive rate). The default model is English only: nothing here
-> says anything about French inputs. See "Measured results and limits".
+> `depends_on`, restart and graceful SIGTERM) at the final head. The default model is
+> English only and was measured on the French corpora: at threshold `0.9` it adds 2
+> true positives and 26 false positives on the French injection corpus, so it is
+> not suitable as a French blocking detector (use `annotate`). See
+> [EVALUATION.md](EVALUATION.md) and "Measured results and limits".
 
 ## Contract
 
@@ -152,8 +154,13 @@ text; open returns 200 and logs `semantic classifier degraded`). Six parallel
 served one after another in 1.3-4.1 s: **inference is serialized**, about 8
 chunks per second in total.
 
-Not validated: French or any other corpus (no recall or false-positive rate), the
-Compose stack, restart and SIGTERM behavior, other CPUs or higher concurrency.
+French corpus quality was measured separately (threshold `0.9`, same image):
+[EVALUATION.md](EVALUATION.md) has the table, provenance and limits. In short, the
+model adds 2 true positives and 26 false positives on the 62-case French injection
+corpus, and about 170 ms p50 per sequential request through the Go service.
+
+Not validated: the Compose stack, restart and SIGTERM behavior, other CPUs or higher
+concurrency, other models or thresholds.
 
 ### Choosing `SEMANTIC_TIMEOUT` for your text limit
 
@@ -245,8 +252,11 @@ python3 deploy/semantic-sidecar/tools/measure.py \
   --thresholds 0.5,0.8,0.9,0.95 --warmup 3
 ```
 
-The shared evaluation corpus is owned by another change; run the reproducer on
-it after that change merges and report the numbers then (`integration_pending`).
+The shared evaluation corpora are the ones summarized in [EVALUATION.md](EVALUATION.md);
+that report came from a separate harness run on the build host that calls the Go
+service, while this tool calls the sidecar directly (model-only latency, one score per
+text). Report numbers from a new corpus with the commit, threshold, hardware, sample
+size and repetitions, and never choose the threshold on the corpus you report.
 
 ## Reproducibility
 

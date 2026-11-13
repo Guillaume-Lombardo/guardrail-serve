@@ -552,8 +552,31 @@ docker compose -f deploy/semantic-sidecar/compose.yaml up --build   # build host
 contract, token limits, container hardening, and the Go service against the sidecar
 (fail-closed 502, fail-open `semantic classifier degraded` warning). **Still
 `integration_pending`:** the Compose stack (`compose up`, isolated network,
-restart, SIGTERM) and any corpus quality measure, notably **French** (the default
-model is English only; no recall or false-positive rate has been measured).
+restart, SIGTERM) at the final head.
+
+**French quality (measured, threshold `0.9`).** On the 62-case French injection
+corpus the deterministic detector scores 29 TP / 1 FP / 30 TN / 2 FN (recall 93.5%,
+FPR 3.2%); the default English model alone scores 30 TP / 27 FP / 4 TN / 1 FN
+(96.8% / 87.1%), and the two combined 31 TP / 27 FP / 4 TN / 0 FN (100% / 87.1%).
+On the French cases of the original corpus the deterministic detector is 6 TP /
+0 FP / 33 TN (the six attacks all found) and the model adds no true positive but
+24 false positives (72.7% FPR). As an English control the model flags 12 of 37
+negatives, mostly texts with secrets or PII. It gains two true positives on French
+for 26 more false positives, so it is **not suitable as a French blocking
+detector**. Full table, provenance (commit, threshold, hardware, n, repetitions)
+and limits: [`deploy/semantic-sidecar/EVALUATION.md`](deploy/semantic-sidecar/EVALUATION.md).
+Latency adds about 170 ms p50 / 210-225 ms p95 on 2 shared vCPUs (the
+deterministic detector takes about 0.3 ms).
+
+**Recommendation.** Keep the semantic detector disabled by default. If you enable
+it, use `semantic_prompt_injection: annotate` with `prompt_injection: block`, as
+the [example `semantic` policy](examples/semantic/policies/policies.yaml) does.
+A policy that explicitly sets the semantic detector to `block` (example
+`semantic-block`) remains configurable, but a semantic block takes precedence over a
+secret `mask` in the same policy: a text the model calls an injection (typically
+`password=…`) is refused whole instead of being redacted, in whichever order the
+stages are listed. This is a limit of the English model on French and on credential
+texts, not an API defect.
 The real-model check is a Go test behind the `realsidecar` build tag (excluded
 from `go test ./...` and from GitHub CI):
 
