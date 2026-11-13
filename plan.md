@@ -173,14 +173,38 @@ Status: validated by Guillaume; delivery in serialized merges after parallel wav
 - Wave 3: L4 French normalization/PII; L5 native secrets entropy/gitleaks.
 - Wave 4: L6 optional HTTP classifier; L7 offline evaluation; L8 container metrics.
 
-- [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment.
-- [x] L2: Runtime and authentication.
-- [x] L3: Policy engine and findings.
+- [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment (merged, PR #4).
+- [x] L2: Runtime and authentication (merged, PR #5).
+- [x] L3: Policy engine and findings (merged, PR #8).
 - [ ] L4: French normalization and PII.
 - [ ] L5: Native secrets with entropy/gitleaks.
 - [ ] L6: Optional HTTP classifier.
 - [ ] L7: Offline evaluation.
 - [ ] L8: Container and metrics.
+
+Corrective lots C1 (prompt-injection response scope, PR #6) and C2 (runtime resource bounds,
+PR #7) are merged. Main is at `5368afc` (L3).
+
+### Validated split of the remaining lots (a / b)
+
+Lots L4 to L8 are each split in two so that independent cores can be built in parallel and
+merged one at a time:
+
+- **a**: independent core in new packages (or new files) with unit tests and a local README or
+  ADR when structural. No policy, API or environment wiring, no runtime registration.
+- **b**: wiring PR that registers the core in the policy catalog, API and environment contract,
+  with integration and end-to-end tests, `.env.template` and root README updates.
+
+| Lot | a | b |
+| --- | --- | --- |
+| L4 | French normalization and PII core (owns `golang.org/x/text` in `go.mod`/`go.sum`) | policy/API/env wiring |
+| L5 | Native secrets core: entropy and gitleaks-style rules (security review required) | policy/API/env wiring |
+| L6 | Optional HTTP classifier core | policy/API/env wiring |
+| L7 | Offline evaluation core | evaluation CI workflow and wiring |
+| L8 | Container image and CI build (delivered, see below) | Metrics, engine and runtime changes |
+
+`plan.md` and the root `README.md` are updated only by the lot designated for it (L8a for the
+plan split and statuses) to avoid merge conflicts between parallel cores.
 
 L1 scope: transport DTOs, dedicated contract tests and route documentation. No runtime,
 authentication, configuration, maximum-length implementation or production changes.
@@ -264,3 +288,24 @@ Delivered:
   end-to-end tests (policy route, LiteLLM policy selection, OpenAPI, logs, auth
   and body limits on the new route).
 - Environment: `LITELLM_DEFAULT_POLICY` added to `.env.template` and local `.env`.
+
+## L8a — Container image
+
+Scope (validated split of L8): `Dockerfile`, `.dockerignore`, a build-only
+`.github/workflows/container.yml`, a root README `Container` section and
+`docs/adr/0012-container-image.md`. No Go code, metrics, engine or runtime change.
+
+Delivered:
+- Multi-stage build: official `golang` Alpine image matching `go.mod` and a
+  `gcr.io/distroless/static-debian13:nonroot` runtime, both pinned by tag and digest.
+  `CGO_ENABLED=0`, `-trimpath`, static binary, exec-form `ENTRYPOINT`, uid `65532`.
+- Port, configuration, health probe and signal handling documented in the README; no
+  `HEALTHCHECK` instruction (no probe binary in distroless).
+- CI builds the image on pull requests with `contents: read`, no push and no registry login, and
+  checks that the build image matches the `go` directive.
+- Evidence: image build through `heavy` on `codex-dev`; smoke test on a loopback port with
+  `GET /health/` returning 200, `POST /scan/secrets` and `/scan/prompt-injection` returning JSON
+  decisions, non-root process, statically linked binary, CA bundle present and `docker stop`
+  exiting 0 in about 0.25 s (graceful `SIGTERM`).
+- ADR: `docs/adr/0012-container-image.md`. No environment contract change.
+- Remaining for L8b: metrics, engine and runtime changes.
