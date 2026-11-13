@@ -172,9 +172,13 @@ described under "Changes after validation".
   Fixed by the bounded drain above, with process-level regression tests (SIGTERM
   during a parked request; admission stopped; blocked backend and stalled client
   bounded by the grace).
-- **`integration_pending`**: the targeted Docker retest of the sidecar's graceful
-  stop on the final head (`docker compose stop`/`kill -TERM` with a request in
-  flight).
+- The targeted Docker retest at `5945c07` validated SIGTERM while a real-model
+  request was in flight: the external client received a complete 200 before
+  exit 0. Closed admission, bounded shutdown, SIGINT with a fake backend and
+  idle keep-alive handling were also verified. The drain covers the current
+  HTTP request only. A multi-batch Go analysis can have its next batch refused;
+  the configured failure mode then applies (sanitized 502 when fail-closed,
+  degraded pass-through when fail-open).
 - **French quality, measured** after L9 merged (`main` at `d756fc3`, threshold `0.9`
   fixed beforehand, sequential, 3 repetitions; provenance and limits in
   [`EVALUATION.md`](../../deploy/semantic-sidecar/EVALUATION.md)). On the 62-case
@@ -197,7 +201,7 @@ The micro-batch loop moved into a backend-independent function so the cooperativ
 deadline is unit-tested with a simulated clock, and the compose file gained the
 internal network and the 10 s default. The Compose run above found the SIGTERM
 defect; the shutdown drain, `SIDECAR_SHUTDOWN_GRACE_SECONDS` and the compose
-`stop_grace_period` were added afterwards and need the targeted retest listed above.
+`stop_grace_period` were added afterwards and passed the targeted retest listed above.
 
 ## Consequences
 

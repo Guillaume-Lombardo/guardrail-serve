@@ -555,8 +555,12 @@ stack then ran on the build host at `75cd4d4` (103 of 104 assertions: readiness,
 isolated network, hardening, API, timeouts, restarts); its one failure, the sidecar
 cutting in-flight requests on SIGTERM, is fixed by a bounded drain
 (`SIDECAR_SHUTDOWN_GRACE_SECONDS`, default 20 s; Compose `stop_grace_period: 25s`).
-**Still `integration_pending`:** the targeted Docker retest of that graceful stop on
-the final head.
+The targeted Docker retest at `5945c07` validated completion of an in-flight
+request before exit, closed admission and bounded shutdown. The drain covers
+only the current sidecar HTTP request: an analysis spanning multiple chunk
+batches can have its next batch refused during shutdown. The Go service then
+applies its configured failure mode (sanitized 502 when fail-closed, degraded
+pass-through when fail-open).
 
 **French quality (measured, threshold `0.9`).** On the 62-case French injection
 corpus the deterministic detector scores 29 TP / 1 FP / 30 TN / 2 FN (recall 93.5%,

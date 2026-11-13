@@ -13,9 +13,9 @@ rationale: [ADR 0019](../../docs/adr/0019-real-semantic-sidecar.md).
 > assertions): `depends_on`/readiness, the `internal: true` network (egress blocked),
 > hardening, the contract with the real model, the guardrail API, timeouts and
 > restarts. The one failure, the sidecar cutting in-flight requests on SIGTERM, is
-> fixed by the bounded drain in "Shutdown". **`integration_pending`: the targeted
-> Docker retest of that graceful stop** on the final head; the drain itself is covered
-> by process-level tests with a fake backend. The default model is
+> fixed by the bounded drain in "Shutdown". The targeted Docker retest at
+> `5945c07` validated in-flight completion, closed admission and bounded shutdown;
+> process-level tests also cover the drain with a fake backend. The default model is
 > English only and was measured on the French corpora: at threshold `0.9` it adds 2
 > true positives and 26 false positives on the French injection corpus, so it is
 > not suitable as a French blocking detector (use `annotate`). See
@@ -140,6 +140,11 @@ On SIGTERM or SIGINT the sidecar:
 3. exits `0` once none is left (`drained`), or after at most
    `SIDECAR_SHUTDOWN_GRACE_SECONDS` (`drain_timeout` logged with the number of
    requests cut). Idle keep-alive connections never delay the exit.
+
+The drain covers one sidecar HTTP request, not an entire Go analysis. Analyses
+that require multiple classifier batches can have their next batch refused
+during shutdown. The Go service applies its configured failure mode: sanitized
+502 when fail-closed, or degraded pass-through when fail-open.
 
 The wait is bounded on purpose: the handler threads stay daemon threads, so a
 stuck backend or a client that stalls inside its body cannot hold the process
