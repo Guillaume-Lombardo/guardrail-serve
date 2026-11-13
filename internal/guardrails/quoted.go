@@ -16,32 +16,62 @@ const maxQuotedBytes = 400
 var (
 	analysisCue = regexp.MustCompile(`\b(?:que\s+signifie|que\s+veut\s+dire|signification|analyse[rz]?|analysez|explique[rz]?|expliquant|traduis|traduire|traduisez|traduction|commente[rz]?|pourquoi|comment\s+(?:detecter|reperer|bloquer|filtrer|reconnaitre|eviter)|exemples?\s+(?:typiques?\s+)?d'(?:attaque|injection)|attaques?|injections?|citation|personnage|article|roman|what\s+does|explain|analy[sz]e|translate)\b`)
 	// An execution request anywhere outside the quotations cancels the
-	// exemption, unless that occurrence is negated ("sans l'executer", "ne
-	// l'applique pas"): see executionRequested.
+	// exemption, unless that occurrence is negated: see executionRequested.
 	executionCue = regexp.MustCompile(`\b(?:execute[rsz]?|applique[rsz]?|obei[rs]|obeissez|obeir|suis\s+(?:la|cette|ces|les|ses)|suivez|suivre|fais\s+ce\s+qu|faites\s+ce\s+qu|fais-(?:le|la)|faites-(?:le|la)|suis-(?:la|le|les)|agis|agissez|(?:mets?|mettez)(?:-(?:la|le|les))?\s+en\s+(?:pratique|oeuvre|application)|follow|obey|apply|comply|do\s+what)\b`)
-	// negatedBefore matches the end of the frame just before an execution cue
-	// when the cue is negated: "sans", "ne" or "n'", then up to three clitics
-	// or negation adverbs.
-	negatedBefore = regexp.MustCompile(`(?:^|[^\pL'])(?:sans|ne|n')\s*(?:(?:pas|jamais|surtout|plus|rien|l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3}$`)
+	// A cue is negated by "sans" before it, or by "ne"/"n'" with a negation
+	// adverb before or after it ("ne pas l'appliquer", "ne l'applique pas",
+	// "il ne faut jamais l'executer").
+	// "ne ... que" is a restriction, not a negation. The leading [^\pL'] makes
+	// "ne" a whole word: the window always starts with the rune before it.
+	sansBefore   = regexp.MustCompile(`[^\pL']sans\s*(?:jamais\s*)?(?:(?:l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3}$`)
+	neBefore     = regexp.MustCompile(`[^\pL'](?:ne|n')\s*(?:(?:faut|dois|doit|devez|devrait|devrais|peux|peut|pouvez|veux|veut)\s*)?(?:(?:l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3}(?P<adverb>(?:surtout\s*)?(?:pas|jamais|plus|rien)\s*(?:(?:l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3})?$`)
+	negatedAfter = regexp.MustCompile(`^[\pL'-]*\s*(?:surtout\s*)?(?:pas|jamais|plus|rien|point)\b`)
+	adverbGroup  = neBefore.SubexpIndex("adverb")
 )
 
-// maxNegationBytes bounds the text inspected before each execution cue.
-const maxNegationBytes = 48
+// negationWindow bounds the text inspected on each side of an execution cue.
+const negationWindow = 48
 
 // executionRequested reports whether the frame contains an execution cue that
 // is not explicitly negated. One affirmative request is enough, even next to a
 // negated one.
 func executionRequested(frame string) bool {
 	for _, cue := range executionCue.FindAllStringIndex(frame, -1) {
-		before := frame[max(0, cue[0]-maxNegationBytes):cue[0]]
-		for !utf8.ValidString(before) {
-			before = before[1:]
-		}
-		if !negatedBefore.MatchString(before) {
+		if !negatedCue(frame, cue[0], cue[1]) {
 			return true
 		}
 	}
 	return false
+}
+
+func negatedCue(frame string, start, end int) bool {
+	from := max(0, start-negationWindow)
+	for from < start && !utf8.RuneStart(frame[from]) {
+		from++
+	}
+	// Keep the rune before the window (or a space at the start of the frame)
+	// so a word boundary is real: "consigne" never yields a standalone "ne".
+	lead := " "
+	if from > 0 {
+		r, _ := utf8.DecodeLastRuneInString(frame[:from])
+		lead = string(r)
+	}
+	before := lead + frame[from:start]
+	if sansBefore.MatchString(before) {
+		return true
+	}
+	match := neBefore.FindStringSubmatchIndex(before)
+	if match == nil {
+		return false
+	}
+	if match[2*adverbGroup] >= 0 {
+		return true
+	}
+	to := min(len(frame), end+negationWindow)
+	for to > end && to < len(frame) && !utf8.RuneStart(frame[to]) {
+		to--
+	}
+	return negatedAfter.MatchString(frame[end:to])
 }
 
 var quotePairs = map[rune]rune{'«': '»', '“': '”', '"': '"'}
