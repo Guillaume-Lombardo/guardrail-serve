@@ -520,7 +520,8 @@ named `secret` captures, rule names and types. An empty override disables secret
 detection. A missing file enables native defaults even when other overrides
 exist. Remove the secrets override to migrate; copied older defaults retain
 older behavior until removed. No secrets YAML is shipped in the default-resource directory, so copying
-that directory to customize other resources keeps native detection enabled. No environment variables changed.
+that directory to customize other resources keeps native detection enabled.
+No environment variables changed.
 
 Detection is heuristic, not exhaustive: plain unquoted word passwords,
 multi-line YAML values, encoded secrets and some prose labels can be missed;
