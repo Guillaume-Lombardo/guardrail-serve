@@ -326,3 +326,12 @@ Implementation:
   original findings, typed masks, detect/annotate and checksums.
 - Golden compatibility differs only by removal of the broad tool-listing false
   positive. Environment files unchanged: no new environment contract.
+||||||| parent of 9a5d491 (feat: observe policy and detector executions with Prometheus)
+## L8b — Prometheus metrics
+
+Validated scope: per-handler injectable registry, authenticated `/metrics` on the
+existing listener; minimal transport-independent engine observer for real policy,
+limit and per-text detector executions, including clean and error outcomes.
+Bound labels to loaded policy/detector names and enums. Preserve API/runtime
+contracts. No L4b regex/YAML, L5/L6 wiring, evaluation workflow or archive changes.
+Deliver adapter, unit/integration/end-to-end tests, Docker smoke and ADR 0014.
