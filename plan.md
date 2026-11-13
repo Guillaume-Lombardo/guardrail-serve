@@ -326,3 +326,26 @@ Implementation:
   original findings, typed masks, detect/annotate and checksums.
 - Golden compatibility differs only by removal of the broad tool-listing false
   positive. Environment files unchanged: no new environment contract.
+## L8b — Prometheus metrics
+
+Validated scope: per-handler injectable registry, authenticated `/metrics` on the
+existing listener; minimal transport-independent engine observer for real policy,
+limit and per-text detector executions, including clean and error outcomes.
+Bound labels to loaded policy/detector names and enums. Preserve API/runtime
+contracts. No L4b regex/YAML, L5/L6 wiring, evaluation workflow or archive changes.
+Deliver adapter, unit/integration/end-to-end tests, Docker smoke and ADR 0014.
+
+Delivered:
+- Value-only optional engine observer; actual policy, payload-limit and per-text
+  detector completions, with clean/match/error outcomes and duration.
+- Per-handler private/injectable Prometheus registry and authenticated/admitted
+  `/metrics`; catalog/enum label allowlists, no scrape instrumentation or globals.
+- Unit, integration and real HTTP end-to-end metrics tests; all suites, vet,
+  focused race tests and pre-commit pass through `heavy` on codex-dev.
+- Existing Dockerfile builds unchanged; nonroot uid 65532, read-only/cap-drop
+  smoke validates a secret scan, redaction, 401 without a key and authenticated
+  metrics containing the actual intervention but no matched value. Session
+  container removed after the smoke; no image published.
+- Independent review: initial APPROVE, rebase recheck and final confirmation;
+  three rounds total, final APPROVE with no open findings.
+- No environment contract change; no archive, regex/YAML or other-lot changes.
