@@ -10,7 +10,16 @@ patterns:
     regex: '(?i)\b(bypass|disable|ignore)\b.{0,30}\b(safety|guardrails?|restrictions?|filters?)\b'
   - name: tool_exfiltration
     type: PROMPT_INJECTION
-    regex: '(?i)\b(show|list|dump|print)\b.{0,30}\b(tools?|functions?|schemas?)\b'
+    regex: '(?i)\b(show|list|dump|print)\b.{0,30}\b(?:(?:internal|available|your|hidden)\s+tools?|(?:tool|function)\s+schemas?|system\s+functions?)\b'
   - name: role_override
     type: PROMPT_INJECTION
     regex: '(?i)\byou are now\b.{0,40}\b(system|developer|root|admin)\b'
+  - name: ignore_instructions_fr
+    type: PROMPT_INJECTION
+    regex: '(?i)\b(ignore[rz]?|oublie[rz]?|contourne[rz]?)\b.{0,40}(?:instructions?|consignes?).{0,30}(?:précédentes?|antérieures?|système|développeur)'
+  - name: reveal_prompt_fr
+    type: PROMPT_INJECTION
+    regex: '(?i)(?:révèle[rz]?|affiche[rz]?|montre[rz]?|divulgue[rz]?).{0,40}(?:(?:prompt|instructions?|consignes?).{0,20}(?:système|développeur|caché)|(?:système|développeur).{0,20}(?:prompt|instructions?))'
+  - name: hostile_tools
+    type: PROMPT_INJECTION
+    regex: '(?i)\b(?:use|call|invoke|utilise[rz]?|appelle[rz]?|détourne[rz]?)\b.{0,30}\b(?:tools?|functions?|outils?|fonctions?)\b.{0,40}\b(?:exfiltrate|steal|bypass|voler|exfiltrer|contourner)\b'

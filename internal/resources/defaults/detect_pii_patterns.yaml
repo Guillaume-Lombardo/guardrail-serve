@@ -7,10 +7,24 @@ patterns:
     regex: '(?P<secret>(?:\+33\s?[1-9](?:[\s.-]?\d{2}){4}|0[1-9](?:[\s.-]?\d{2}){4}))'
   - name: iban
     type: IBAN
-    regex: '(?P<secret>\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b)'
+    validator: iban
+    regex: '(?i)(?P<secret>\b[A-Z]{2}\d{2}(?:[ -]?[A-Z0-9]){11,30}\b)'
   - name: ipv4
     type: IP_ADDRESS
     regex: '(?P<secret>\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b)'
   - name: credit_card
     type: CREDIT_CARD
-    regex: '(?P<secret>\b(?:\d[ -]?){13,19}\b)'
+    validator: payment_card
+    regex: '(?P<secret>\b\d(?:[ -]?\d){11,18}\b)'
+  - name: nir-fr
+    type: FR_NIR
+    validator: fr_nir
+    regex: '(?i)\b(?:NIR|numéro de sécurité sociale|sécurité sociale)\s*[:=]?\s*(?P<secret>[123478](?:[ -]?[0-9AB]){14})\b'
+  - name: siren-fr
+    type: FR_SIREN
+    validator: fr_siren
+    regex: '(?i)\bSIREN\s*[:=]?\s*(?P<secret>\d(?:[ -]?\d){8})\b'
+  - name: siret-fr
+    type: FR_SIRET
+    validator: fr_siret
+    regex: '(?i)\bSIRET\s*[:=]?\s*(?P<secret>\d(?:[ -]?\d){13})\b'
