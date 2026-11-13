@@ -307,3 +307,46 @@ func TestCheckOutputPath(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckOutputPathRefusesSymlinkEscapes(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scratchDir := filepath.Join(root, loaders.ScratchDir)
+	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(scratchDir, "link")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "target.jsonl"), filepath.Join(scratchDir, "file-link.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(scratchDir, "link", "x.jsonl"),
+		filepath.Join(scratchDir, "link", "new", "x.jsonl"),
+		filepath.Join(scratchDir, "file-link.jsonl"),
+	} {
+		if err := loaders.CheckOutputPath(path, false); err == nil {
+			t.Errorf("%s accepted", path)
+		}
+	}
+	if err := loaders.CheckOutputPath(filepath.Join(scratchDir, "ok", "x.jsonl"), false); err != nil {
+		t.Errorf("plain path rejected: %v", err)
+	}
+}
+
+func TestDecodeRejectsTrailingDelimiters(t *testing.T) {
+	data, err := os.ReadFile("testdata/bipia_attack_sample.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loaders.ImportBIPIA(data, loaders.Options{}); err != nil {
+		t.Fatalf("control sample rejected: %v", err)
+	}
+	if _, err := loaders.ImportBIPIA(append(bytes.TrimSpace(data), '}'), loaders.Options{}); err == nil {
+		t.Fatal("trailing brace accepted")
+	}
+}

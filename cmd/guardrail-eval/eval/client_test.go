@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -103,15 +105,17 @@ func TestRequestFailuresAreDistinguishedAndSafe(t *testing.T) {
 			http.Redirect(w, r, "/elsewhere", http.StatusFound)
 			return true
 		}, "scan", eval.KindHTTPStatus, 302},
-		"not json":            {respond(200, `<html>`), "scan", eval.KindInvalidResponse, 0},
-		"unknown decision":    {respond(200, `{"decision":"MAYBE"}`), "scan", eval.KindInvalidResponse, 0},
-		"missing findings":    {respond(200, `{"decision":"NONE"}`), "policy", eval.KindInvalidResponse, 0},
-		"null findings":       {respond(200, `{"decision":"NONE","findings":null}`), "policy", eval.KindInvalidResponse, 0},
-		"foreign text index":  {respond(200, `{"decision":"NONE","findings":[{"text_index":1,"detector":"d"}]}`), "policy", eval.KindInvalidResponse, 0},
-		"finding no detector": {respond(200, `{"decision":"NONE","findings":[{"text_index":0}]}`), "policy", eval.KindInvalidResponse, 0},
-		"too large":           {respond(200, `{"decision":"NONE","pad":"`+strings.Repeat("x", 600)+`"}`), "scan", eval.KindResponseTooLarge, 200},
-		"policy limit block":  {respond(200, `{"decision":"BLOCKED","findings":[]}`), "policy", eval.KindLimitExceeded, 0},
-		"scan limit block":    {respond(200, `{"decision":"BLOCKED","metadata":{"guardrail":"max_length"}}`), "scan", eval.KindLimitExceeded, 0},
+		"not json":             {respond(200, `<html>`), "scan", eval.KindInvalidResponse, 0},
+		"unknown decision":     {respond(200, `{"decision":"MAYBE"}`), "scan", eval.KindInvalidResponse, 0},
+		"missing findings":     {respond(200, `{"decision":"NONE"}`), "policy", eval.KindInvalidResponse, 0},
+		"null findings":        {respond(200, `{"decision":"NONE","findings":null}`), "policy", eval.KindInvalidResponse, 0},
+		"foreign text index":   {respond(200, `{"decision":"NONE","findings":[{"text_index":1,"detector":"d"}]}`), "policy", eval.KindInvalidResponse, 0},
+		"finding no detector":  {respond(200, `{"decision":"NONE","findings":[{"text_index":0}]}`), "policy", eval.KindInvalidResponse, 0},
+		"too large":            {respond(200, `{"decision":"NONE","pad":"`+strings.Repeat("x", 600)+`"}`), "scan", eval.KindResponseTooLarge, 200},
+		"policy limit block":   {respond(200, `{"decision":"BLOCKED","findings":[]}`), "policy", eval.KindLimitExceeded, 0},
+		"scan limit block":     {respond(200, `{"decision":"BLOCKED","metadata":{"guardrail":"max_length"}}`), "scan", eval.KindLimitExceeded, 0},
+		"scan no metadata":     {respond(200, `{"decision":"BLOCKED"}`), "scan", eval.KindInvalidResponse, 0},
+		"scan empty guardrail": {respond(200, `{"decision":"NONE","metadata":{"guardrail":""}}`), "scan", eval.KindInvalidResponse, 0},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -248,5 +252,31 @@ func TestParseEnums(t *testing.T) {
 	}
 	if _, err := json.Marshal(eval.ModeAnnotate); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A server that answers with garbage and echoes the credential must not get it
+// copied into the error, which ends up in reports.
+func TestMalformedHTTPResponseDoesNotEchoRemoteData(t *testing.T) {
+	const key = "echoed-key-value-123"
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.CopyN(io.Discard, conn, 1)
+		_, _ = conn.Write([]byte("NOT-HTTP " + key + "\r\n\r\n"))
+	}()
+	client := newClient(t, eval.ClientConfig{BaseURL: "http://" + listener.Addr().String(), APIKey: key})
+	_, err = client.Scan(context.Background(), "/scan/secrets", eval.InputRequest, "x")
+	reqErr := requestError(t, err)
+	if reqErr.Kind != eval.KindTransport || strings.Contains(reqErr.Error(), key) {
+		t.Fatalf("err = %v", reqErr)
 	}
 }

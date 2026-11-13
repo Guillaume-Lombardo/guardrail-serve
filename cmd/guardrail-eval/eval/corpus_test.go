@@ -47,6 +47,8 @@ func TestParseCorpusRejectsInvalidInput(t *testing.T) {
 		"header unknown": {`{"format":"guardrail-eval-corpus","version":1,"name":"unit","extra":1}` + "\n" + good, "unknown field"},
 		"case unknown":   {validHeader + `{"id":"a-1","lang":"en","text":"x","labels":{"detect_pii":true},"expected":1}`, "line 2"},
 		"trailing data":  {validHeader + good + ` {}`, "unexpected data"},
+		"trailing brace": {validHeader + good + `}`, "unexpected data"},
+		"null label":     {validHeader + `{"id":"a","lang":"en","text":"x","labels":{"detect_pii":null}}`, "must be true or false"},
 		"not json":       {validHeader + "nope", "line 2"},
 		"duplicate id":   {validHeader + good + "\n" + good, "duplicate case id"},
 		"bad id":         {validHeader + `{"id":"A B","lang":"en","text":"x","labels":{"detect_pii":true}}`, "id must match"},

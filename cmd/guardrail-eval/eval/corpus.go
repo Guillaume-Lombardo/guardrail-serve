@@ -157,6 +157,9 @@ func ParseCorpus(reader io.Reader) (*Corpus, error) {
 		if err := decodeStrict(raw, &c); err != nil {
 			return nil, fmt.Errorf("line %d: case: %w", line, err)
 		}
+		if err := requireBooleanLabels(raw); err != nil {
+			return nil, fmt.Errorf("line %d: case %q: %w", line, c.ID, err)
+		}
 		if err := c.normalize(); err != nil {
 			return nil, fmt.Errorf("line %d: case %q: %w", line, c.ID, err)
 		}
@@ -178,13 +181,30 @@ func ParseCorpus(reader io.Reader) (*Corpus, error) {
 	return corpus, nil
 }
 
+// requireBooleanLabels rejects a null label, which would otherwise decode to
+// false and silently become a negative reference.
+func requireBooleanLabels(raw []byte) error {
+	var probe struct {
+		Labels map[string]json.RawMessage `json:"labels"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err
+	}
+	for detector, value := range probe.Labels {
+		if string(bytes.TrimSpace(value)) == "null" {
+			return fmt.Errorf("label for %q must be true or false, got null", detector)
+		}
+	}
+	return nil
+}
+
 func decodeStrict(raw []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	if decoder.More() {
+	if _, err := decoder.Token(); err != io.EOF {
 		return errors.New("unexpected data after the JSON object")
 	}
 	return nil

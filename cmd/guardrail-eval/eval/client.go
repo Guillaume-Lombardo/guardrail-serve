@@ -248,8 +248,8 @@ func (c *Client) Scan(ctx context.Context, route string, input InputType, text s
 	if err := c.post(ctx, route, input, text, &wire); err != nil {
 		return ScanResult{}, err
 	}
-	if !wire.Decision.valid() {
-		return ScanResult{}, invalid("response lacks a valid decision")
+	if !wire.Decision.valid() || wire.Metadata.Guardrail == "" {
+		return ScanResult{}, invalid("response lacks a valid decision or metadata.guardrail")
 	}
 	if wire.Metadata.Guardrail == limitsGuardrail {
 		return ScanResult{}, &RequestError{Kind: KindLimitExceeded, Message: "payload limits blocked the case before detection"}
@@ -323,5 +323,11 @@ func (c *Client) transportError(ctx context.Context, err error) *RequestError {
 	case errors.Is(err, context.Canceled) || ctx.Err() != nil:
 		return &RequestError{Kind: KindTransport, Message: "request canceled"}
 	}
-	return &RequestError{Kind: KindTransport, Message: err.Error()}
+	// Only network-level errors are quoted: other errors (for example a
+	// malformed HTTP response) can embed bytes sent by the remote server.
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return &RequestError{Kind: KindTransport, Message: opErr.Error()}
+	}
+	return &RequestError{Kind: KindTransport, Message: "the server did not return a valid HTTP response"}
 }

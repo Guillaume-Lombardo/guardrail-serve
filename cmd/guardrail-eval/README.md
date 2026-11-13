@@ -55,8 +55,10 @@ A case's `input_type` (`request` or `response`) is sent as the stage, so
 response-only behaviour (for example injection in a tool result) can be labelled.
 
 Responses that are not detection outcomes never enter the counts: transport
-errors, non-2xx statuses, bodies above `--max-response-bytes`, invalid JSON, and
-payload-limit blocks (`max_length`, `limit_exceeded`). They are reported under
+errors, non-2xx statuses, bodies above `--max-response-bytes`, invalid JSON (a
+`/scan` response must carry `decision` and `metadata.guardrail`), and
+payload-limit blocks (`metadata.guardrail` = `max_length`). Error messages are
+built by the tool and never quote the remote server's bytes. They are reported under
 `errors` and in the per-detector `errored` counter.
 
 ## Authentication

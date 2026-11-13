@@ -16,8 +16,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -300,7 +302,9 @@ func Fetch(ctx context.Context, client *http.Client, req FetchRequest) ([]byte, 
 }
 
 // CheckOutputPath refuses to write an imported corpus anywhere it could be
-// committed: the path must have a ScratchDir component unless allowAny is set.
+// committed: the path must have a ScratchDir component unless allowAny is set,
+// and the destination, once symbolic links are resolved, must stay inside that
+// directory.
 func CheckOutputPath(path string, allowAny bool) error {
 	if path == "" {
 		return errors.New("--output is required")
@@ -312,12 +316,56 @@ func CheckOutputPath(path string, allowAny bool) error {
 	if err != nil {
 		return err
 	}
-	for _, part := range strings.Split(filepath.ToSlash(abs), "/") {
-		if part == ScratchDir {
+	root := scratchRoot(abs)
+	if root == "" {
+		return fmt.Errorf("--output must be inside a %s directory (git-ignored); pass --allow-any-output if the destination is ignored by other means", ScratchDir)
+	}
+	// Nothing below a scratch directory that does not exist yet can be a link.
+	if _, err := os.Lstat(root); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
+		return err
 	}
-	return fmt.Errorf("--output must be inside a %s directory (git-ignored); pass --allow-any-output if the destination is ignored by other means", ScratchDir)
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	// Resolve the longest existing prefix: the file itself when it exists,
+	// otherwise its nearest existing parent. The rest does not exist yet.
+	existing, rest := abs, ""
+	for {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return fmt.Errorf("cannot resolve --output %q", path)
+		}
+		rest = filepath.Join(filepath.Base(existing), rest)
+		existing = parent
+	}
+	realExisting, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(realRoot, filepath.Join(realExisting, rest))
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("--output resolves outside the %s directory through a symbolic link", ScratchDir)
+	}
+	return nil
+}
+
+// scratchRoot returns the path up to and including the first ScratchDir
+// component of an absolute path, or "" when there is none.
+func scratchRoot(abs string) string {
+	parts := strings.Split(filepath.ToSlash(abs), "/")
+	for index, part := range parts {
+		if part == ScratchDir {
+			return filepath.FromSlash(strings.Join(parts[:index+1], "/"))
+		}
+	}
+	return ""
 }
 
 // decodeJSON decodes data as exactly one JSON value.
@@ -326,7 +374,7 @@ func decodeJSON(data []byte, target any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	if decoder.More() {
+	if _, err := decoder.Token(); err != io.EOF {
 		return errors.New("unexpected data after the JSON value")
 	}
 	return nil

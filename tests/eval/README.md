@@ -80,8 +80,9 @@ go run ./cmd/guardrail-eval run --base-url http://127.0.0.1:8080 \
 - With `--url`, the download is HTTPS-only (redirects must stay on HTTPS), bounded
   in size and time (`--timeout`), and rejected unless its SHA-256 equals `--sha256`.
   Pin URLs to a commit, never to a branch, so the digest stays meaningful.
-- Output must be under a `.agent-tmp/` directory (ignored by git) unless
-  `--allow-any-output` is set. The `tests/eval/.gitignore` also ignores `imported/`.
+- Output must be under a `.agent-tmp/` directory (ignored by git), and must still
+  resolve inside it once symbolic links are followed, unless `--allow-any-output`
+  is set (for another destination you know git ignores). The `tests/eval/.gitignore` also ignores `imported/`.
 - `--lang`, `--name`, `--limit` and (Presidio) `--entities` tune the import. The
   corpus header records dataset, URL, revision and digest of the source.
 - The importers print what they skipped and why; skipped records are not labelled.
