@@ -468,11 +468,36 @@ the orchestrator.
   old `original-v1.json` before the refresh. Known failures went from 17 to 8;
   the 4 secret cases had already been fixed by L5b.
 - [x] Docs: ADR 0018, `tests/eval/README.md`.
-- [ ] Root README Evaluation sync (artifacts, table, ADR 0018): deferred to L10
-  after merge.
+- [x] Root README Evaluation sync (artifacts, table, ADR 0018): done by L10 on
+  PR #20 after L9 merged.
 - [x] Independent review: six rounds; rounds 1–5 found nine issues to fix
   (refusals and prohibitions flagged, verbs matched inside words, pronoun and
   negation handling of the quoted-analysis exemption). Each one was fixed
   with a test that fails first. Round 6: APPROVE, no blocker or should; its
   one nit is fixed as well.
-- [ ] PR CI: tracked on the L9 PR. Open, not merged by this lot.
+- [x] Merged as #21 (squash, `d756fc3`).
+
+### L10 delivery status (PR #20, not merged)
+
+- [x] `deploy/semantic-sidecar`: Python 3.13 stdlib HTTP server with
+  transformers/torch on CPU (TEI does not support DeBERTa sequence
+  classification). `POST /classify` keeps the `scores` contract of
+  `internal/semantic/httpclassifier`, which is unchanged. Bounds on body, texts,
+  tokens (real tokenizer, never truncated), inflight requests, connections and
+  a cooperative deadline; logs carry no input, header or token. ADR 0019.
+- [x] Default model `protectai/deberta-v3-base-prompt-injection-v2` (Apache-2.0,
+  not gated, English only, pinned revision). Llama Prompt Guard 2 is gated and
+  documented as configuration only; no token exists in the vault, so none was
+  requested.
+- [x] Compose isolates the sidecar on an `internal: true` network.
+- [x] Real model validated on `codex-dev` at `857e02c`: build, labels, contract,
+  limits, hardening and the Go service in closed (502) and open (warning)
+  modes. Measured about 125 ms per 510-character chunk on 2 shared vCPUs, so
+  `SEMANTIC_TIMEOUT` is sized per `MAX_TEXT_CHARS` (README).
+- [x] Root README Evaluation section synced with the merged L9 state.
+- [ ] `integration_pending`: the Compose stack with restart/SIGTERM revalidated
+  on the current head, and the semantic sidecar scored on the L9 corpora
+  (orchestrator-run real-model evaluation, separate from this PR; its report
+  may complete the documentation). No real-model quality or French-quality
+  claim is made before then.
+- [ ] PR CI and review of the final head: handed to the orchestrator.

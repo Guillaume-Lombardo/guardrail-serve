@@ -396,22 +396,50 @@ scripts/eval-offline.sh
 Provision the Go toolchain specified in `go.mod` and modules first (`go mod download`).
 Evaluation itself disables Go downloads, uses the real service over an ephemeral
 loopback HTTP listener, and requires no datasets, models, LLM, API key or `.env`.
-The separate Evaluation workflow uploads `.agent-tmp/eval/{current,gate}.json`.
 A request failure or regression produces a nonzero test/process exit status.
 
-The [baseline](tests/eval/baseline/original-v1.json) records measurements at
-`f3950e90e22a3e8bcb20443ae33f16591d618a13` for the unchanged 83-case original
-corpus. All known false positives/negatives remain visible by case ID. Metrics
-below are rounded for readability; gates use full precision.
+The gate measures two versioned corpora, always separately (never pooled), and
+the separate Evaluation workflow uploads the artifacts from `.agent-tmp/eval/`:
+
+| Corpus | Baseline | Artifacts |
+|---|---|---|
+| `guardrail-serve-original-v1` (83 cases) | [`original-v1.json`](tests/eval/baseline/original-v1.json) | `current.json`, `gate.json` |
+| `guardrail-serve-french-injection-v1` (62 cases: 31 positives, 31 negatives) | [`french-injection-v1.json`](tests/eval/baseline/french-injection-v1.json) | `french-injection-v1.current.json`, `french-injection-v1.gate.json` |
+
+Each baseline pins the corpus hash and per-case detections; all known false
+positives/negatives remain visible by case ID. Metrics below are rounded for
+readability; gates use full precision.
+
+Original corpus (83 cases), as measured by the current baseline (after
+[ADR 0018](docs/adr/0018-french-injection-recall.md)):
 
 | Detector | Language | TP | FP | TN | FN | Precision | Recall | FPR |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | detect_pii | en | 8 | 2 | 34 | 0 | .800000 | 1 | .055556 |
 | detect_pii | fr | 5 | 2 | 31 | 0 | .714286 | 1 | .060606 |
-| detect_secret | en | 8 | 3 | 32 | 1 | .727273 | .888889 | .085714 |
-| detect_secret | fr | 7 | 2 | 29 | 1 | .777778 | .875000 | .064516 |
-| prompt_injection | en | 5 | 1 | 36 | 2 | .833333 | .714286 | .027027 |
-| prompt_injection | fr | 3 | 0 | 33 | 3 | 1 | .500000 | 0 |
+| detect_secret | en | 8 | 1 | 34 | 1 | .888889 | .888889 | .028571 |
+| detect_secret | fr | 7 | 0 | 31 | 1 | 1 | .875000 | 0 |
+| prompt_injection | en | 7 | 1 | 36 | 0 | .875000 | 1 | .027027 |
+| prompt_injection | fr | 6 | 0 | 33 | 0 | 1 | 1 | 0 |
+
+The six historical French injection cases are all detected (6/6) with no false
+positive.
+
+French prompt-injection corpus (62 cases, 31 positives and 31 negatives),
+`prompt_injection`/`fr`:
+
+| TP | FP | TN | FN | Recall | FPR |
+|---:|---:|---:|---:|---:|---:|
+| 29 | 1 | 30 | 2 | 93.5% | 3.2% |
+
+The two false negatives (`frinj-pos-030`, `frinj-pos-031`) and the false
+positive (`frinj-neg-011`) are kept as labelled known failures; see
+[`tests/eval/README.md`](tests/eval/README.md) for the corpus, the families and
+the failure analysis. On both corpora the gate also enforces absolute French
+floors for `prompt_injection`/`fr`: recall at least 85% and FPR at most 5%, both
+defined (ADR 0018). These are deterministic-rule results only; they say nothing
+about the optional semantic sidecar, which has not been scored on these corpora
+yet.
 
 For every detector total and detector/language group, precision/recall must be
 at least baseline and FPR at most baseline. Every previously correct case label
@@ -429,7 +457,9 @@ GOPROXY=off GOTOOLCHAIN=local go test ./tests/eval \
 The refresh refuses regressions against the old baseline. Review and commit the
 old/new metrics and corrected case IDs as evidence; do not relax thresholds or
 edit corpus labels to get a pass. See [ADR 0015](docs/adr/0015-offline-regression-gate.md)
-and the [evaluation CLI documentation](cmd/guardrail-eval/README.md).
+and the [evaluation CLI documentation](cmd/guardrail-eval/README.md). Baseline refresh,
+floors and the corpus are described in [`tests/eval/README.md`](tests/eval/README.md) and
+[ADR 0018](docs/adr/0018-french-injection-recall.md).
 
 ### Optional semantic policy detector (L6b)
 
