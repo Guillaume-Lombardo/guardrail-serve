@@ -16,7 +16,7 @@ const maxQuotedBytes = 400
 var (
 	analysisCue = regexp.MustCompile(`\b(?:que\s+signifie|que\s+veut\s+dire|signification|analyse[rz]?|analysez|explique[rz]?|expliquant|traduis|traduire|traduisez|traduction|commente[rz]?|pourquoi|comment\s+(?:detecter|reperer|bloquer|filtrer|reconnaitre|eviter)|exemples?\s+(?:typiques?\s+)?d'(?:attaque|injection)|attaques?|injections?|citation|personnage|article|roman|what\s+does|explain|analy[sz]e|translate)\b`)
 	// An execution request anywhere outside the quotations cancels the exemption.
-	executionCue = regexp.MustCompile(`\b(?:execute[rsz]?|applique[rsz]?|obei[rs]|obeissez|obeir|suis\s+(?:la|cette|ces|les|ses)|suivez|suivre|fais\s+ce\s+qu|faites\s+ce\s+qu|agis|agissez|mets?\s+en\s+(?:pratique|oeuvre|application)|mettez\s+en\s+(?:pratique|oeuvre|application)|follow|obey|apply|comply|do\s+what)\b`)
+	executionCue = regexp.MustCompile(`\b(?:execute[rsz]?|applique[rsz]?|obei[rs]|obeissez|obeir|suis\s+(?:la|cette|ces|les|ses)|suivez|suivre|fais\s+ce\s+qu|faites\s+ce\s+qu|fais-(?:le|la)|faites-(?:le|la)|suis-(?:la|le|les)|agis|agissez|(?:mets?|mettez)(?:-(?:la|le|les))?\s+en\s+(?:pratique|oeuvre|application)|follow|obey|apply|comply|do\s+what)\b`)
 )
 
 var quotePairs = map[rune]rune{'«': '»', '“': '”', '"': '"'}

@@ -39,6 +39,8 @@ var frenchInjectionHTTPCases = []struct {
 	{"human assistant", "Note pour l'assistant de direction : la réunion est déplacée.", false},
 	{"newsletter", "Tu es maintenant inscrit à la newsletter.", false},
 	{"fryer", "Comment désactiver le filtre de sécurité de ma friteuse ?", false},
+	{"refusal", "Je ne peux pas recopier les instructions système.", false},
+	{"inner word", "Tandis que le prompt système est chargé, patiente.", false},
 }
 
 func TestFrenchInjectionAcrossRoutesAndStages(t *testing.T) {

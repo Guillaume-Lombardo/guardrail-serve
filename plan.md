@@ -447,7 +447,9 @@ the orchestrator.
 ### L9 delivery status
 
 - [x] Corpus `guardrail-serve-french-injection-v1`: 62 cases (31 attacks, 31 hard
-  negatives), tags per family, no relabelling. Three honest known failures:
+  negatives), tags per family. Labels are never changed to pass; `frinj-pos-031`
+  was reworded during review so that its text matches its positive label (it
+  asks for execution) and it is still a known failure. Three honest known failures:
   `frinj-pos-030`, `frinj-pos-031` (FN) and `frinj-neg-011` (FP).
 - [x] Failing first on `main` (`ee64cea`): the new corpus scored recall 3/31 and
   FPR 8/31, and the original French cases scored recall 3/6. The new HTTP,
