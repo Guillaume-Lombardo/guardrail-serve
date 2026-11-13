@@ -21,7 +21,10 @@ import (
 	"github.com/g1lom/guardrail-serve/internal/config"
 )
 
-const originalCorpus = "corpus/guardrail-serve-original-v1.jsonl"
+const (
+	originalCorpus        = "corpus/guardrail-serve-original-v1.jsonl"
+	frenchInjectionCorpus = "corpus/guardrail-serve-french-injection-v1.jsonl"
+)
 
 func startService(t *testing.T, cfg config.Config) *httptest.Server {
 	t.Helper()
@@ -87,6 +90,40 @@ func TestShippedCorpusIsValidAndCanonical(t *testing.T) {
 				t.Errorf("%s/%s: %d positives, %d negatives", detector, lang, positives[key{detector, lang}], negatives[key{detector, lang}])
 			}
 		}
+	}
+}
+
+// The French injection corpus is canonical, French only, injection-only, and
+// keeps the documented denominators (31 attacks, 31 hard negatives).
+func TestFrenchInjectionCorpusShape(t *testing.T) {
+	data, err := os.ReadFile(frenchInjectionCorpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := eval.ParseCorpus(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonical bytes.Buffer
+	if err := eval.WriteCorpus(&canonical, corpus.Header, corpus.Cases); err != nil {
+		t.Fatal(err)
+	}
+	if canonical.String() != string(data) {
+		t.Fatal("corpus is not in canonical form; regenerate it with eval.WriteCorpus")
+	}
+	positives, negatives := 0, 0
+	for _, item := range corpus.Cases {
+		if item.Lang != "fr" || item.Labels["detect_pii"] || item.Labels["detect_secret"] {
+			t.Errorf("%s: lang %q labels %v", item.ID, item.Lang, item.Labels)
+		}
+		if item.Labels["prompt_injection"] {
+			positives++
+		} else {
+			negatives++
+		}
+	}
+	if positives != 31 || negatives != 31 {
+		t.Fatalf("%d positives, %d negatives; update tests/eval/README.md denominators with a new corpus version", positives, negatives)
 	}
 }
 
