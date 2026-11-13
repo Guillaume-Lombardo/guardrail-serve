@@ -698,3 +698,56 @@ func TestCancelledContextIsAnErrorForEveryInput(t *testing.T) {
 		t.Fatal("a cancelled context must not reach the sidecar")
 	}
 }
+
+// cancelAfterFirstErr reports a live context on its first Err call, then
+// cancels the real parent and keeps reporting nil for that same call. It
+// models a caller cancelling while the detection is already past the entry
+// check, which is only visible to the final context check.
+type cancelAfterFirstErr struct {
+	context.Context
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (c *cancelAfterFirstErr) Err() error {
+	c.calls++
+	if c.calls == 1 {
+		c.cancel()
+		return nil
+	}
+	return c.Context.Err()
+}
+
+func TestCancellationAfterEntryCheckBeatsEarlierFailure(t *testing.T) {
+	for _, mode := range []FailureMode{FailOpen, FailClosed} {
+		t.Run(string(mode), func(t *testing.T) {
+			var calls atomic.Int32
+			server := newServer(t, func(http.ResponseWriter, *http.Request) { calls.Add(1) })
+			classifier := newClassifier(t, server.URL, func(c *Config) {
+				c.FailureMode, c.ChunkRunes, c.MaxChunks = mode, 64, 1
+			})
+
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ctx := &cancelAfterFirstErr{Context: parent, cancel: cancel}
+
+			// Needs two chunks: fails with too_many_chunks before the final check.
+			assessment, err := classifier.DetectPromptInjection(ctx, []string{strings.Repeat("x", 100)})
+
+			assertKind(t, err, FailureCanceled)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error does not unwrap to context.Canceled: %v", err)
+			}
+			if assessment.Triggered || assessment.Score != 0 || assessment.Reason != "" ||
+				assessment.Model != "" || assessment.Metadata != nil {
+				t.Fatalf("a cancelled detection must return an empty assessment: %+v", assessment)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("server called %d times", calls.Load())
+			}
+			if ctx.calls < 2 {
+				t.Fatalf("final context check never ran (Err called %d times)", ctx.calls)
+			}
+		})
+	}
+}
