@@ -574,8 +574,9 @@ the [example `semantic` policy](examples/semantic/policies/policies.yaml) does.
 A policy that explicitly sets the semantic detector to `block` (example
 `semantic-block`) remains configurable, but a semantic block takes precedence over a
 secret `mask` in the same policy: a text the model calls an injection (typically
-`password=…`) is refused whole instead of being redacted, in whichever order the
-stages are listed. This is a limit of the English model on French and on credential
+`password=…`) is refused whole instead of being redacted, regardless of the order of the
+detector steps within the same evaluated stage (input and output are evaluated
+separately), in enforce mode. This is a limit of the English model on French and on credential
 texts, not an API defect.
 The real-model check is a Go test behind the `realsidecar` build tag (excluded
 from `go test ./...` and from GitHub CI):

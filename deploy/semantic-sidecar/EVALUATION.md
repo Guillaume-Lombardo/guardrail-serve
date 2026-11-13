@@ -99,8 +99,10 @@ averaged 856 MiB (peak 900 MiB); the Go service peaked at 29.6 MiB RSS.
    text containing credentials or personal data. Rule order does not rescue it: a
    semantic `block` stage combined with `detect_secret` set to `mask` blocks every
    text the model calls an injection (for example `password=…`) instead of masking
-   it, whichever stage is listed first, because a block takes precedence. A blocked
-   request is refused whole, never partly redacted.
+   it, regardless of the order of the detector steps within the same evaluated
+   stage (input and output are evaluated separately), in enforce mode, because a
+   block takes precedence. A blocked request is refused whole, never partly
+   redacted.
 4. For French blocking, a multilingual or French-tuned model would have to be
    evaluated on the same corpora, with a threshold chosen on a separate calibration
    set. That work is out of scope here.

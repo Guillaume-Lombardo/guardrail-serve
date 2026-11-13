@@ -17,8 +17,10 @@ policies:
         - detector: semantic_prompt_injection
           action: annotate
   # Explicit opt-in: the semantic detector blocks too. Expect false positives on
-  # French input and on texts with secrets or PII. A semantic block takes precedence
-  # over a secret mask in the same policy, so such texts are refused, not redacted.
+  # French input and on texts with secrets or PII. In enforce mode, within one
+  # evaluated stage (input and output are evaluated separately) and whatever the
+  # order of the steps, a semantic block takes precedence over a secret mask, so
+  # such texts are refused, not redacted.
   # Use it only with a model and a threshold calibrated on your own traffic.
   - name: semantic-block
     mode: enforce

@@ -184,7 +184,7 @@ stack on the build host.
   extra true positives, so it must not be the French blocking detector. The
   recommended operator policy is deterministic `block` plus semantic `annotate`; the
   semantic detector stays disabled by default. An explicit semantic `block` remains
-  configurable, and it takes precedence over a secret `mask`, so texts that look like
+  configurable, and, within the same evaluated stage and regardless of step order (enforce mode), it takes precedence over a secret `mask`, so texts that look like
   credentials are blocked rather than redacted. This is a model limit, not an API
   defect; a multilingual or French-tuned model would need the same evaluation with a
   separately calibrated threshold.
