@@ -25,9 +25,11 @@ services:
       SEMANTIC_URL: http://semantic-sidecar:8080/classify
       SEMANTIC_FORMAT: scores
       # Budget for ONE text, all chunk batches included. Measured on 2 shared vCPUs
-      # (about 0.125 s per 510-rune chunk, English): 2s fails around 12000 chars, 5s
-      # around 19000. 10s covers MAX_TEXT_CHARS=20000 at low load; concurrent requests
-      # queue behind a serialized sidecar, so recalibrate on your hardware (README.md).
+      # (about 0.2 s per 510-rune chunk with the 86M model): 32 chunks took 6.5 s and
+      # MAX_TEXT_CHARS=20000 is about 45 chunks, roughly 9 s at low load. 10s leaves almost
+      # no margin for the largest texts: use 15s or more for them, or lower
+      # MAX_TEXT_CHARS. Concurrent requests queue behind a serialized sidecar, so
+      # recalibrate on your hardware (README.md).
       SEMANTIC_TIMEOUT: ${SEMANTIC_TIMEOUT:-10s}
       SEMANTIC_THRESHOLD: ${SEMANTIC_THRESHOLD:-0.9}
       SEMANTIC_FAILURE_MODE: ${SEMANTIC_FAILURE_MODE:-closed}

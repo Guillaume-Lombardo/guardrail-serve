@@ -607,9 +607,9 @@ SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 SEMANTIC_SIDECAR_FRENCH=1 \
 inference serialized) a 510-character chunk costs about 200 ms with the 86M model (L11, French text; the
 older 125 ms figure came from another image and load and is not comparable). 32
 chunks took 6.5 s, so the `2s` Go default fails on texts of about 10 chunks or more.
-`MAX_TEXT_CHARS=20000` is about 40 chunks, roughly 8 s at low load (extrapolated, not
-measured at that size): the Compose default of `10s` leaves little margin, so raise
-`SEMANTIC_TIMEOUT` or lower `MAX_TEXT_CHARS`; recalibrate under concurrency
+`MAX_TEXT_CHARS=20000` is about 45 chunks (510 characters with a 64-character overlap), roughly 9 s at low
+load (extrapolated, not measured at that size): the Compose default of `10s` leaves
+almost no margin, so use 15 s or more for `SEMANTIC_TIMEOUT`, or lower `MAX_TEXT_CHARS`; recalibrate under concurrency
 (`HTTP_MAX_CONCURRENT_REQUESTS`) and keep `HTTP_WRITE_TIMEOUT` and any upstream
 guardrail timeout above the worst whole request. `SEMANTIC_FAILURE_MODE=closed`
 returns 502 when the sidecar fails, times out or rejects an over-long text; `open`
