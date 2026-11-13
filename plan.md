@@ -427,3 +427,45 @@ until this PR's CI and reviews complete; no merge is authorized in this run.
   Test/style nits fixed; nested secret labels remain a documented limitation.
 - [ ] Hosted PR CI completion; delivery remains open and unmerged until handoff.
   No merge authorized in this run.
+
+## L9 / L10 — French injection recall and semantic sidecar (validated)
+
+Validated by Guillaume: two parallel lots, one PR each, merged one at a time by
+the orchestrator.
+
+- **L9 — French prompt-injection recall (deterministic).** Scope: `tests/eval/**`,
+  the prompt-injection detector, its YAML rules and tests, `internal/textnorm/**`,
+  French-specific tests, ADR 0018 and this plan. Target: on a new French corpus
+  of at least 40 cases, balanced between varied attacks and hard negatives,
+  recall ≥ 0.85 and FPR ≤ 0.05. No regression against the old baseline, with
+  every previously correct case still correct. No global normalization change
+  for PII or secrets. RE2 only. No network in CI. No new environment variable.
+- **L10 — owns the root `README.md`, `.env.template`, `deploy/**`, the semantic
+  client and `tests/integration/semantic_sidecar/**`.** It syncs the root README
+  Evaluation section with L9 after L9 merges.
+
+### L9 delivery status
+
+- [x] Corpus `guardrail-serve-french-injection-v1`: 62 cases (31 attacks, 31 hard
+  negatives), tags per family, no relabelling. Three honest known failures:
+  `frinj-pos-030`, `frinj-pos-031` (FN) and `frinj-neg-011` (FP).
+- [x] Failing first on `main` (`ee64cea`): the new corpus scored recall 3/31 and
+  FPR 8/31, and the original French cases scored recall 3/6. The new HTTP,
+  LiteLLM, offset, mask and override tests failed.
+- [x] Matching-only `textnorm.Fold`: diacritics, case, apostrophes, homoglyphs,
+  leet and spaced letters. Spans map back to whole original graphemes; tests
+  check the invariants and fuzzing found no failure. Per-rule
+  `channel: folded` (prompt_injection only), a `(?P<match>)` reported span, and
+  a quoted-analysis exemption. Nine folded French rules; English rules and
+  golden responses are unchanged, plus one English `forget_everything` rule.
+- [x] Results: new corpus recall 29/31 (0.935) and FPR 1/31 (0.032). Original
+  corpus French recall 6/6, FPR 0/33. English injection recall rose from 5/7
+  to 7/7.
+- [x] Gate: one baseline per corpus, never pooled, with absolute French floors
+  (recall ≥ 0.85, FPR ≤ 0.05) on both corpora. The new code passed against the
+  old `original-v1.json` before the refresh. Known failures went from 17 to 8;
+  the 4 secret cases had already been fixed by L5b.
+- [x] Docs: ADR 0018, `tests/eval/README.md`.
+- [ ] Root README Evaluation sync (artifacts, table, ADR 0018): deferred to L10
+  after merge.
+- [ ] PR CI and review: tracked on the L9 PR. Open, not merged by this lot.

@@ -152,3 +152,40 @@ func Compare(baseline, current *Snapshot, corpus *eval.Corpus) []string {
 	sort.Strings(violations)
 	return violations
 }
+
+// Floor is an absolute quality requirement on one detector/language group of
+// one corpus snapshot. It complements Compare: Compare forbids regressions
+// against the measured baseline, a Floor forbids a baseline below the target.
+type Floor struct {
+	Detector  string
+	Lang      string
+	MinRecall float64
+	MaxFPR    float64
+}
+
+// CheckFloors reports every floor that the snapshot misses. A floor on a
+// missing group or on an undefined ratio fails: no denominator, no evidence.
+func CheckFloors(s *Snapshot, floors []Floor) []string {
+	violations := []string{}
+	for _, floor := range floors {
+		name := floor.Detector + "/" + floor.Lang
+		group, ok := s.Groups[floor.Detector][floor.Lang]
+		switch {
+		case !ok:
+			violations = append(violations, "floor group missing: "+name)
+			continue
+		case !group.Metrics.Recall.Defined:
+			violations = append(violations, "floor recall undefined: "+name)
+		case group.Metrics.Recall.Value < floor.MinRecall:
+			violations = append(violations, fmt.Sprintf("floor recall missed: %s %.6f < %.6f", name, group.Metrics.Recall.Value, floor.MinRecall))
+		}
+		switch {
+		case !group.Metrics.FPR.Defined:
+			violations = append(violations, "floor fpr undefined: "+name)
+		case group.Metrics.FPR.Value > floor.MaxFPR:
+			violations = append(violations, fmt.Sprintf("floor fpr exceeded: %s %.6f > %.6f", name, group.Metrics.FPR.Value, floor.MaxFPR))
+		}
+	}
+	sort.Strings(violations)
+	return violations
+}

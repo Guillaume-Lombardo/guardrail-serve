@@ -1,7 +1,17 @@
+# Prompt-injection rules. Rules without a channel match the normalized text
+# (strip + NFKC, ADR 0013). French rules use channel: folded (ADR 0018): they
+# match a matching-only view that is lowercase, without diacritics, with
+# Latin lookalikes, digits used as letters and spaced-out letters folded, and
+# report original spans through the (?P<match>...) group. Their regexes are
+# written in folded form (no accents, lowercase). exempt_quoted_analysis
+# ignores a match inside a quotation that the rest of the text only analyses.
 patterns:
   - name: ignore_instructions
     type: PROMPT_INJECTION
     regex: '(?i)\b(ignore|disregard|override)\b.{0,40}\b(previous|prior|above|system|developer)\b.{0,40}\b(instructions?|prompt)\b'
+  - name: forget_everything
+    type: PROMPT_INJECTION
+    regex: '(?i)\b(?:forget|disregard)\s+(?:everything|all)\s+(?:(?:that\s+)?you\s+(?:were|have\s+been)\s+(?:told|given)|(?:written\s+)?(?:above|before))\b'
   - name: reveal_prompt
     type: PROMPT_INJECTION
     regex: '(?i)\b(reveal|show|print|dump|display)\b.{0,40}\b(system|developer|hidden)\b.{0,20}\b(prompt|instructions?)\b'
@@ -14,12 +24,60 @@ patterns:
   - name: role_override
     type: PROMPT_INJECTION
     regex: '(?i)\byou are now\b.{0,40}\b(system|developer|root|admin)\b'
-  - name: ignore_instructions_fr
-    type: PROMPT_INJECTION
-    regex: '(?i)\b(ignore[rz]?|oublie[rz]?|contourne[rz]?)\b.{0,40}(?:instructions?|consignes?).{0,30}(?:précédentes?|antérieures?|système|développeur)'
-  - name: reveal_prompt_fr
-    type: PROMPT_INJECTION
-    regex: '(?i)(?:révèle|révéle[rz]|affiche[rz]?|montre[rz]?|divulgue[rz]?).{0,40}(?:(?:prompt|instructions?|consignes?).{0,20}(?:système|développeur|caché)|(?:système|développeur).{0,20}(?:prompt|instructions?))'
   - name: hostile_tools
     type: PROMPT_INJECTION
     regex: '(?i)\b(?:use|call|invoke|utilise[rz]?|appelle|appele[rz]|détourne[rz]?)\b.{0,30}\b(?:tools?|functions?|outils?|fonctions?)\b.{0,40}\b(?:exfiltrate|steal|bypass|voler|exfiltrer|contourner)\b'
+  # Imperative (tu/vous) or requested override of earlier, system or the assistant's own instructions.
+  - name: ignore_instructions_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?:(?:^|[.!?;:,(\[{<>«»\"“”*#|\n-]|\b(?:et|puis|alors|maintenant|donc|desormais|stp|svp|please|ensuite|mais|ok|bon|aussi|d''abord|a\s*present|a\s*partir\s*de\s*maintenant|des\s*maintenant)\b)\s*|\b(?:peux-tu|pourrais-tu|pouvez-vous|pourriez-vous|tu\s*peux|tu\s*pourrais|tu\s*dois|vous\s*devez|tu\s*vas|vous\s*allez|veuillez|merci\s*d[e'']|je\s*veux\s*que\s*tu|je\s*te\s*demande\s*d[e'']|je\s*vous\s*demande\s*d[e'']|il\s*faut|essaie\s*d[e'']|essayez\s*d[e'']|n''hesitez?\s*pas\s*a)\s*)(?P<match>(?:ignore[rz]?|ignorons|oublie[rz]?|oublions|ne\s*(?:tiens|tenez|prends|prenez)\s*(?:plus|pas|aucun)\s*(?:en\s*)?compte|(?:ne\s*)?(?:pas|plus)\s*(?:tenir|prendre)\s*(?:en\s*)?compte|(?:fais|faites|faire)\s*(?:abstraction|fi)|passe[rz]?\s*outre|outrepasse[rz]?|laisse[rz]?\s*tomber|ecarte[rz]?|neglige[rz]?|efface[rz]?)\s*(?:(?:(?:toute?s?|tous)\s*)?(?:tes|vos|ta|ton|votre|your|de\s*(?:tes|vos|ton|ta|votre))\s*(?:[\w''-]+\s*){0,2}?(?:instructions?|consignes?|regles?|directives?|ordres?|indications?|prompts?|rules?|guidelines?|contraintes?|restrictions?|limitations?|programmation)|(?:(?:toute?s?|tous)\s*(?:les|tes|vos|ces)|les|tes|vos|ces|ta|ton|votre|la|le|l''|des|du|de\s*(?:tes|vos|ces|la|l''|toutes\s*(?:les|tes|vos))|your|all|the|any)\s*(?:[\w''-]+\s*){0,3}?(?:instructions?|consignes?|regles?|directives?|ordres?|indications?|prompts?|rules?|guidelines?|contraintes?|restrictions?|limitations?|programmation)[^.!?\n]{0,40}?(?:precedente?s?|anterieure?s?|ci-?\s*dessus|plus\s*haut|au-?\s*dessus|initiale?s?|d''origine|originale?s?|de\s*depart|de\s*base|du\s*(?:systeme|developpeur|concepteur|createur|prompt)|systeme|developpeur|qu''on\s*(?:t''a|vous\s*a)|que\s*l''on\s*(?:t''a|vous\s*a)|que\s*(?:tu\s*as|vous\s*avez)\s*recue?s?|recue?s?|jusqu''ici|jusqu''a\s*(?:present|maintenant)|au\s*debut|en\s*vigueur|actuelle?s?|habituelle?s?|de\s*securite|de\s*moderation|de\s*confidentialite|internes?|cachee?s?|secrete?s?|previous|prior|above|earlier|system|de\s*(?:ton|ta|tes|votre|vos)|d''avant|definie?s?\s*(?:avant|plus\s*haut|au\s*debut|precedemment)|donnee?s?\s*(?:avant|plus\s*haut|au\s*debut))|(?:(?:toute?s?|tous)\s*(?:les|tes|vos|ces)|les|tes|vos|ces|ta|ton|votre|la|le|l''|des|du|de\s*(?:tes|vos|ces|la|l''|toutes\s*(?:les|tes|vos))|your|all|the|any)\s*(?:[\w''-]+\s*){0,2}?(?:precedente?s?|anterieure?s?|ci-?\s*dessus|plus\s*haut|au-?\s*dessus|initiale?s?|d''origine|originale?s?|de\s*depart|de\s*base|du\s*(?:systeme|developpeur|concepteur|createur|prompt)|systeme|developpeur|qu''on\s*(?:t''a|vous\s*a)|que\s*l''on\s*(?:t''a|vous\s*a)|que\s*(?:tu\s*as|vous\s*avez)\s*recue?s?|recue?s?|jusqu''ici|jusqu''a\s*(?:present|maintenant)|au\s*debut|en\s*vigueur|actuelle?s?|habituelle?s?|de\s*securite|de\s*moderation|de\s*confidentialite|internes?|cachee?s?|secrete?s?|previous|prior|above|earlier|system|de\s*(?:ton|ta|tes|votre|vos)|d''avant|definie?s?\s*(?:avant|plus\s*haut|au\s*debut|precedemment)|donnee?s?\s*(?:avant|plus\s*haut|au\s*debut))\s*(?:instructions?|consignes?|regles?|directives?|ordres?|indications?|prompts?|rules?|guidelines?|contraintes?|restrictions?|limitations?|programmation)))'
+  # Paraphrased reset: forget everything the assistant was told.
+  - name: forget_everything_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?:(?:^|[.!?;:,(\[{<>«»\"“”*#|\n-]|\b(?:et|puis|alors|maintenant|donc|desormais|stp|svp|please|ensuite|mais|ok|bon|aussi|d''abord|a\s*present|a\s*partir\s*de\s*maintenant|des\s*maintenant)\b)\s*|\b(?:peux-tu|pourrais-tu|pouvez-vous|pourriez-vous|tu\s*peux|tu\s*pourrais|tu\s*dois|vous\s*devez|tu\s*vas|vous\s*allez|veuillez|merci\s*d[e'']|je\s*veux\s*que\s*tu|je\s*te\s*demande\s*d[e'']|je\s*vous\s*demande\s*d[e'']|il\s*faut|essaie\s*d[e'']|essayez\s*d[e'']|n''hesitez?\s*pas\s*a)\s*)(?P<match>(?:oublie[rz]?|efface[rz]?|ignore[rz]?)\s*(?:tout\s*ce\s*(?:qu''on|que\s*l''on|qu''ils|que\s*(?:ton|ta|tes|votre|vos)\s*[\w''-]+)\s*(?:t''a|vous\s*a|t''ont|vous\s*ont)\s*(?:dit|appris|demande|donne|ecrit|explique|indique|impose|programme|fourni)|tout\s*ce\s*qui\s*(?:precede|est\s*(?:au-?\s*dessus|ecrit\s*(?:avant|plus\s*haut|au-?\s*dessus)))|tout\s*ce\s*que\s*(?:tu\s*as|vous\s*avez)\s*(?:recu|appris|lu)\s*(?:avant|jusqu''ici|jusqu''a\s*present|precedemment)))'
+  # Role takeover: unrestricted persona, developer mode, system administrator.
+  - name: role_override_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?P<match>(?:(?:tu\s*es|vous\s*etes|tu\s*deviens|vous\s*devenez)\s*(?:maintenant|desormais|a\s*present|dorenavant|a\s*partir\s*de\s*maintenant)|(?:a\s*partir\s*de\s*maintenant|desormais|dorenavant|des\s*maintenant|a\s*present)\s*,?\s*(?:tu\s*es|vous\s*etes|tu\s*seras|vous\s*serez|tu\s*joues|tu\s*agis|agis|reponds)|(?:joue[rz]?|jouez|incarne[rz]?)\s*(?:le\s*role\s*d[''eu]|un|une)|(?:fais|faites)\s*(?:comme\s*si|semblant\s*d'')\s*(?:tu\s*etais|vous\s*etiez|etre)|imagine[rz]?\s*que\s*(?:tu\s*es|vous\s*etes)|passe[rz]?\s*en|active[rz]?\s*(?:le|ton|votre))[^.!?\n]{0,50}?(?:\bdan\b|mode\s*(?:developpeur|dev|debride|sans\s*(?:filtres?|limites?|restrictions?|censure)|jailbreak|admin|dieu|god)|sans\s*(?:aucune?\s*)?(?:restrictions?|regles?|limites?|filtres?|censure|garde-?\s*fous|tabous?)|non\s*censuree?|debridee?|liberee?\s*de|admin(?:istrateur)?\s*(?:systeme|root)|super\s*-?\s*utilisateur|\broot\b|qui\s*(?:n''a|n''as|ne\s*suit|ignore)\s*(?:aucune|pas\s*de|plus\s*de|ses|tes)?\s*(?:regles?|limites?|restrictions?|filtres?)))'
+  # Disclosure of the system prompt or the assistant's hidden instructions.
+  - name: reveal_prompt_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?P<match>(?:revele[rz]?|affiche[rz]?|montre[rz]?|divulgue[rz]?|devoile[rz]?|donne[rz]?|ecris|ecrivez|ecrire|recopie[rz]?|repete[rz]?|cite[rz]?|imprime[rz]?|partage[rz]?|liste[rz]?|dis|dites|copie[rz]?|recrache[rz]?|reproduis|reproduisez|retranscris|retranscrivez)\b[^.!?\n]{0,40}?(?:\b(?:ton|votre|your)\s*prompt\b|\b(?:ton|ta|tes|votre|vos|your)\s*(?:[\w''-]+\s*){0,1}?(?:prompts?\s*(?:systeme|system)|message\s*systeme|(?:instructions?|consignes?|directives?)\s*(?:systeme|initiale?s?|cachee?s?|secrete?s?|internes?|d''origine|originale?s?|de\s*depart|completes?|du\s*developpeur))|\b(?:le|la|les|l''|ce|ces|cette|du|des|the)\s*(?:prompts?\s*(?:systeme|system|cache|secret|initial|interne|d''origine|original|developpeur)|system\s*prompt|message\s*(?:systeme|cache|initial)|(?:instructions?|consignes?|directives?)\s*(?:systeme|initiale?s?|cachee?s?|secrete?s?|internes?|d''origine|originale?s?|de\s*depart|completes?|du\s*developpeur)|texte\s*(?:au-?\s*dessus|qui\s*precede|avant\s*ce\s*message))|(?:instructions?|consignes?|prompts?|message)\s*(?:que\s*tu\s*as\s*recue?s?|qu''on\s*t''a\s*(?:donnee?s?|fournie?s?|transmise?s?)|que\s*vous\s*avez\s*recue?s?)))'
+  # Sending the conversation, prompt or credentials to an external destination.
+  - name: exfiltrate_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?P<match>(?:envoie[rz]?|envoyez|transfere[rz]?|transmets|transmettez|transmettre|exfiltre[rz]?|fais\s*suivre|faites\s*suivre|copie[rz]?|colle[rz]?|poste[rz]?|publie[rz]?|encode[rz]?|insere[rz]?|ajoute[rz]?|integre[rz]?|redirige[rz]?)\b[^\n]{0,60}?(?:(?:toute?\s*)?(?:la|cette|notre)\s*(?:conversation|discussion|session)|l''(?:integralite|historique|ensemble)\s*(?:de\s*(?:la|cette|notre|nos)\s*)?(?:conversation|discussion|echanges|messages)|l''historique\s*(?:du\s*chat|des\s*echanges)|(?:nos|tous\s*les|les)\s*(?:echanges|messages\s*(?:precedents|de\s*l''utilisateur))|(?:ton|le|votre)\s*(?:prompt|message)\s*systeme|(?:tes|vos|les)\s*instructions\s*(?:systeme|initiales|cachees)|(?:ses|les|leurs|tes|vos)\s*(?:identifiants|mots\s*de\s*passe|cles?\s*(?:api|d''api|secretes?|privees?)|jetons?|tokens?|cookies?)|(?:les|ses)\s*donnees\s*(?:de\s*l''utilisateur|personnelles|du\s*client|bancaires)|the\s*(?:whole\s*|entire\s*)?conversation)[^\n]{0,80}?(?:https?://|www\.|[\w.+-]+@[\w-]+\.[\w.]+|\bwebhook\b|serveur\s*(?:externe|distant)|adresse\s*(?:externe|suivante|ci-dessous)|cette\s*(?:adresse|url)|pastebin|image\s*markdown|!\[))'
+  # Fake role tags, chat-template tokens or end-of-document markers followed by instructions.
+  - name: fake_delimiter
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?P<match>(?:<\s*/?\s*(?:system|systeme|sys|admin|developer|developpeur)\s*>|<\|\s*(?:im_start|im_end|system)\s*\|>|\[\s*/?\s*(?:inst|sys|system|systeme)\s*\])(?s:.){0,80}?(?:nouvelles?\s*(?:instructions?|consignes?|regles?)|nouveaux\s*ordres|instructions?\s*:|consignes?\s*:|tu\s*(?:dois|reponds|vas|es)|vous\s*(?:devez|repondez|allez|etes)|ignore|oublie|desormais|a\s*partir\s*de\s*maintenant|reponds|you\s*(?:must|are|will))|#{2,}\s*(?:nouvelles?|nouveaux|new|updated)\s*(?:instructions?|consignes?|directives?|regles?|rules)|\[\s*(?:fin|end)\s*(?:du|de\s*la|des|of\s*the|of)?\s*(?:document|texte|contexte|donnees|message|prompt|input|instructions?|consignes?)\s*\](?s:.){0,80}?(?:instructions?|consignes?|systeme|system|assistant|tu\s*dois|desormais))'
+  # Instructions addressed to an AI hidden in a document, an email or an HTML comment.
+  - name: hidden_directive_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?P<match>\b(?:note|message|instructions?|consignes?|remarque|information|avis|directive)s?\s*(?:pour|a\s*l''attention\s*d[eu'']|a\s*l''intention\s*d[eu'']|destinee?s?\s*(?:a|au|aux)|adressee?s?\s*(?:a|au|aux)|to|for)\s*(?:l''|le\s*|la\s*|les\s*|un\s*|une\s*|ton\s*|votre\s*|the\s*|any\s*)?(?:ia\b|intelligence\s*artificielle|assistants?\s*(?:ia|virtuels?|automatiques?|intelligents?|numeriques?)\b|modeles?\s*(?:de\s*langage|d''ia|ia)\b|llms?\b|chatbots?\b|agents?\s*(?:ia|conversationnels?|autonomes?)\b|robots?\s*conversationnels?\b|ai\b)|\bsi\s*(?:tu\s*es|vous\s*etes)\s*(?:une?\s*|l'')\s*(?:ia|intelligence\s*artificielle|assistant|modele|llm|chatbot|agent|robot|ai)\b[^.!?\n]{0,30}?(?:qui|en\s*train\s*de)\s*(?:lis|lit|lisez|lire|analyses?|analysez|analyser|resumes?|resumez|resumer|traites?|traitez|traiter|evalues?|evaluez|evaluer|tries?|triez|trier|parcours|parcourez)|<!--\s*(?:(?:note|message|instructions?|consignes?)\s*(?:pour|to|for|a)?\s*(?:l''|le\s*|la\s*|the\s*)?)?(?:assistant|ia|ai|modele|model|llm|chatbot)\s*[:,])'
+  # Disabling or bypassing the assistant's safeguards.
+  - name: bypass_safety_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?:(?:^|[.!?;:,(\[{<>«»\"“”*#|\n-]|\b(?:et|puis|alors|maintenant|donc|desormais|stp|svp|please|ensuite|mais|ok|bon|aussi|d''abord|a\s*present|a\s*partir\s*de\s*maintenant|des\s*maintenant)\b)\s*|\b(?:peux-tu|pourrais-tu|pouvez-vous|pourriez-vous|tu\s*peux|tu\s*pourrais|tu\s*dois|vous\s*devez|tu\s*vas|vous\s*allez|veuillez|merci\s*d[e'']|je\s*veux\s*que\s*tu|je\s*te\s*demande\s*d[e'']|je\s*vous\s*demande\s*d[e'']|il\s*faut|essaie\s*d[e'']|essayez\s*d[e'']|n''hesitez?\s*pas\s*a)\s*)(?P<match>(?:contourne[rz]?|desactive[rz]?|supprime[rz]?|leve[rz]?|enleve[rz]?|retire[rz]?|passe[rz]?\s*outre|outrepasse[rz]?|ignore[rz]?|coupe[rz]?)\s*(?:(?:(?:toute?s?|tous)\s*)?(?:tes|vos|ta|ton|votre|your|de\s*(?:tes|vos|ton|ta|votre))\s*(?:[\w''-]+\s*){0,2}?(?:(?:filtres?\s*(?:de\s*(?:securite|contenu|moderation|protection)|anti-?\s*(?:jailbreak|injection)|ethiques?)|garde-?\s*fous|mecanismes?\s*de\s*(?:securite|protection|moderation)|politiques?\s*de\s*(?:contenu|securite|moderation)|regles?\s*de\s*(?:securite|moderation|contenu|confidentialite)|safety|guardrails?)|(?:restrictions?|limitations?|protections?|censures?|filtres?|limites?|securites?|moderation|alignement))|(?:(?:toute?s?|tous)\s*)?(?:les|the|all)\s*(?:[\w''-]+\s*){0,2}?(?:filtres?\s*(?:de\s*(?:securite|contenu|moderation|protection)|anti-?\s*(?:jailbreak|injection)|ethiques?)|garde-?\s*fous|mecanismes?\s*de\s*(?:securite|protection|moderation)|politiques?\s*de\s*(?:contenu|securite|moderation)|regles?\s*de\s*(?:securite|moderation|contenu|confidentialite)|safety|guardrails?)|la\s*(?:moderation|censure)|l''alignement))'
+  # Answering without censorship, restrictions or the assistant's rules.
+  - name: answer_unrestricted_fr
+    type: PROMPT_INJECTION
+    channel: folded
+    exempt_quoted_analysis: true
+    regex: '(?P<match>(?:reponds|repondez|repondre|ecris|ecrivez|parle|parlez|agis|agissez|continue[rz]?)\s*(?:[\w''-]+\s*){0,3}?sans\s*(?:(?:aucune?\s*|plus\s*de\s*|la\s*moindre\s*)?(?:censures?|restrictions?|filtres?\s*(?:de\s*securite|moral|ethique)|garde-?\s*fous|tabous?|limites?\s*(?:morales?|ethiques?)|regles?\s*(?:de\s*(?:securite|moderation)|ethiques?))|(?:tes|vos)\s*(?:regles?|limites?|filtres?)|aucune?\s*(?:filtre|limite)\s*(?:ni|,)\s*(?:censure|restriction)))'
