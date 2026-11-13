@@ -1,0 +1,6 @@
+**/__pycache__
+tests
+tools/measure.py
+*.md
+compose*.yaml
+.env*

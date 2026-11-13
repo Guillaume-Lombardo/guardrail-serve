@@ -497,6 +497,47 @@ required by the Go service or its fixed-fixture/httptest suites. The rune chunk
 heuristic does not guarantee a checkpoint token limit; calibrate the sidecar and
 threshold against your traffic before deployment. See [ADR 0016](docs/adr/0016-semantic-policy-adapter.md).
 
+### Semantic sidecar with a real model (L10)
+
+[`deploy/semantic-sidecar`](deploy/semantic-sidecar/README.md) is a deployable
+CPU sidecar for the `scores` format: a small bounded Python service (no
+`trust_remote_code`, safetensors only, non-root, read-only filesystem, offline at
+runtime) that serves a prompt-injection classifier on `POST /classify`, with
+`/healthz` and `/readyz`. The default model is
+[`protectai/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2)
+(Apache-2.0, pinned commit, **English only**, no jailbreak detection). Llama
+Prompt Guard 2 is a documented configuration, not a default: it is gated and
+needs the operator's access token and license acceptance. Model, revision and
+attack labels are configuration; see
+[ADR 0019](docs/adr/0019-real-semantic-sidecar.md) for sources, licenses and
+the TEI decision (stock TEI lists only CamemBERT and XLM-RoBERTa for sequence
+classification).
+
+```sh
+docker compose -f deploy/semantic-sidecar/compose.yaml up --build   # build host only
+```
+
+**Status: `integration_pending`.** The server and its contract with the Go
+client are tested against a fake backend; the image build, the real model's
+labels and its recall, false-positive rate and latency are not measured yet.
+The real-model check is a Go test behind the `realsidecar` build tag (excluded
+from `go test ./...` and from GitHub CI):
+
+```sh
+SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 \
+  go test -tags realsidecar ./tests/integration/semantic_sidecar -run TestRealModel -count=1 -v
+```
+
+Operational guidance for the settings above: `SEMANTIC_TIMEOUT` must cover a
+CPU forward pass for every chunk batch of a long text (the `2s` default is
+unvalidated for a base-size model, so measure p95 with
+`deploy/semantic-sidecar/tools/measure.py`); `SEMANTIC_FAILURE_MODE=closed`
+returns 502 when the sidecar fails or rejects an over-long text, `open` passes
+the text and logs `semantic classifier degraded`; `SEMANTIC_THRESHOLD` is
+per-model and must be calibrated on your data, the sidecar returns
+probabilities only. The 510-rune chunking stays a heuristic: the sidecar counts
+real tokens and answers 422 rather than truncating.
+
 ### Native secret detection
 
 Without a `detect_secret_contextual_patterns.yaml` override, `detect_secret`

@@ -1,0 +1,65 @@
+# guardrail-serve + CPU semantic sidecar. Run the build on the designated build
+# host only (see README.md). The sidecar publishes no port: only the guardrail
+# service reaches it over the compose network.
+#
+#   docker compose -f deploy/semantic-sidecar/compose.yaml up --build
+#
+# Gated models (Llama Prompt Guard 2): add compose.gated.yaml and export HF_TOKEN
+# in the build shell; the token is a BuildKit secret, never an argument or env of the image.
+name: guardrail-semantic
+
+services:
+  guardrail:
+    build:
+      context: ../..
+    ports:
+      - "127.0.0.1:${GUARDRAIL_PORT:-8000}:8000"
+    environment:
+      API_PORT: "8000"
+      SEMANTIC_ENABLED: "true"
+      SEMANTIC_URL: http://semantic-sidecar:8080/classify
+      SEMANTIC_FORMAT: scores
+      # Budget for one text: every 510-rune chunk batch of a long text is scored
+      # on CPU. Measure p95 on your hardware (README.md) before lowering it.
+      SEMANTIC_TIMEOUT: ${SEMANTIC_TIMEOUT:-5s}
+      SEMANTIC_THRESHOLD: ${SEMANTIC_THRESHOLD:-0.9}
+      SEMANTIC_FAILURE_MODE: ${SEMANTIC_FAILURE_MODE:-closed}
+      GUARDRAILS_CONFIG_DIR: /policies
+      LITELLM_DEFAULT_POLICY: semantic
+      GUARDRAIL_API_KEYS: ${GUARDRAIL_API_KEYS:-}
+    volumes:
+      - ../../examples/semantic/policies:/policies:ro
+    depends_on:
+      semantic-sidecar:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  semantic-sidecar:
+    build:
+      context: .
+      args:
+        MODEL_ID: ${SIDECAR_MODEL_ID:-protectai/deberta-v3-base-prompt-injection-v2}
+        MODEL_REVISION: ${SIDECAR_MODEL_REVISION:-90c9989b1a342275dd0d1a95aad283c04e075671}
+        MODEL_SAFETENSORS_SHA256: ${SIDECAR_MODEL_SAFETENSORS_SHA256-6521cb8d0ac08148c81464899c424e6148fcc62befa371089fa4061d8b6e0424}
+    image: guardrail-serve-semantic-sidecar:local
+    environment:
+      SIDECAR_MALICIOUS_LABELS: ${SIDECAR_MALICIOUS_LABELS:-INJECTION}
+      SIDECAR_MAX_TOKENS: ${SIDECAR_MAX_TOKENS:-512}
+      SIDECAR_MAX_TEXTS: ${SIDECAR_MAX_TEXTS:-32}
+      SIDECAR_MAX_BODY_BYTES: ${SIDECAR_MAX_BODY_BYTES:-1048576}
+      SIDECAR_MAX_INFLIGHT: ${SIDECAR_MAX_INFLIGHT:-4}
+      SIDECAR_INFERENCE_TIMEOUT_SECONDS: ${SIDECAR_INFERENCE_TIMEOUT_SECONDS:-10}
+      SIDECAR_TORCH_THREADS: ${SIDECAR_TORCH_THREADS:-2}
+    expose:
+      - "8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2
+    restart: unless-stopped
