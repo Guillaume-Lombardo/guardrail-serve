@@ -208,7 +208,6 @@
       "metadata": {
         "guardrail": "prompt_injection",
         "matched_rules": [
-          "tool_exfiltration",
           "bypass_safety"
         ]
       },

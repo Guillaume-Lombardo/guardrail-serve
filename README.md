@@ -301,3 +301,41 @@ pre-commit run --all-files
 2. Create or connect the GitHub repository.
 3. Push the initial `main` branch.
 4. After bootstrap, do all further work on dedicated branches with PRs, CI, and review.
+
+### Normalized deterministic detection
+
+PII and prompt-injection rules scan an NFKC view with zero-width and bidi
+formatting controls removed. English and French hostile instruction overrides,
+system-prompt disclosure and hostile tool use are covered by deterministic
+patterns; ordinary requests such as “list the tools I need to build a shed”
+pass. These patterns are bounded heuristics, not a semantic safety guarantee.
+Secret detection is unchanged.
+
+Matches map back to the original bytes through `internal/textnorm`; API findings
+use original rune offsets. Masks replace whole original grapheme clusters.
+Ligature expansions can produce overlapping findings, merged deterministically
+by the policy engine. Clean text, detect-mode text and annotated text retain
+all original characters, including formatting and decomposed accents.
+
+PII rules accept an optional `validator` field: `payment_card`, `iban`, `fr_nir`,
+`fr_siren`, or `fr_siret`; unknown validators fail startup. Embedded card rules
+require Luhn (12–19 digits), IBAN rules require registered country format and
+MOD 97, and French identifiers use the shared NIR/SIREN/SIRET validators.
+NIR/SIREN/SIRET require their contextual labels (NIR also accepts “sécurité
+sociale” and “numéro de sécurité sociale”) to avoid treating arbitrary numeric
+sequences as identifiers. A labeled French identifier is not also treated as a
+payment card. ASCII spaces/hyphens may separate identifier characters; NFKC
+also accepts compatibility spaces and digits. Invalid checksums are discarded.
+IPv4 literals remain detectable, except immediately after `version`, `release`,
+`ver`, or `v` with optional spacing and `:`, `=`, `-` separators. Card matches
+end at the last digit and preserve following spaces.
+
+PII/injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
+error, before returning any detections. JSON decoding replaces malformed UTF-8
+and unpaired UTF-16 surrogates with U+FFFD; these decoded texts therefore also
+fail closed through the existing detector-error HTTP response (500), without
+texts or findings. Literal U+FFFD is deliberately rejected too: after decoding,
+it cannot be distinguished from damaged input. Offsets always refer to valid
+original UTF-8, never to a repaired string. Policies that do not run either
+detector retain their existing behavior. No admission/body/rune limit changes.
+See [ADR 0013](docs/adr/0013-normalized-detector-integration.md).
