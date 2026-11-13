@@ -129,4 +129,6 @@ class TransformersBackend:
                 probabilities = torch.softmax(logits.float(), dim=-1)[:, self._malicious].sum(dim=-1)
                 for row, i in enumerate(members):
                     scores[i] = float(probabilities[row])
+                if time.monotonic() >= deadline:
+                    raise DeadlineExceeded
         return scores

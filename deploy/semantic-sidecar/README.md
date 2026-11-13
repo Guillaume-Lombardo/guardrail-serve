@@ -29,7 +29,7 @@ Errors are `{"error": "<code>"}` and never contain input, headers or paths:
 | 422 | `text_too_long` (with `index`), `invalid_text` | A text exceeds `SIDECAR_MAX_TOKENS` real tokens (never truncated), or is not valid Unicode. |
 | 500 | `backend_error` | Model failure or invalid output (wrong count, NaN, outside `[0, 1]`). |
 | 503 | `not_ready`, `overloaded`, `busy` | Loading, too many requests/connections in flight, or the inference slot was not free before the deadline. `Retry-After: 1`. |
-| 504 | `timeout` | The deadline (`SIDECAR_INFERENCE_TIMEOUT_SECONDS`) passed between micro-batches. |
+| 504 | `timeout` | The deadline (`SIDECAR_INFERENCE_TIMEOUT_SECONDS`) passed before scoring finished (checked after every micro-batch and before responding). |
 
 The client's rune chunking (510 runes) is a heuristic, not a token guarantee
 (unusual Unicode can need more tokens than runes). The sidecar counts real
@@ -99,7 +99,7 @@ CPython 3.13 virtual environment, download the snapshot with
 | `SIDECAR_MAX_CONNECTIONS` | `32` | Open connections; more are refused with 503. |
 | `SIDECAR_REQUEST_TIMEOUT_SECONDS` | `10` | Socket read timeout. |
 | `SIDECAR_INFERENCE_TIMEOUT_SECONDS` | `10` | Deadline from request start (queue + inference). |
-| `SIDECAR_BATCH_SIZE` | `8` | Micro-batch size; the deadline is checked between micro-batches. |
+| `SIDECAR_BATCH_SIZE` | `8` | Micro-batch size; the deadline is checked after each micro-batch. |
 | `SIDECAR_TORCH_THREADS` | `0` | PyTorch intra-op threads (`0` keeps the default). |
 
 Choosing the Go-side settings (`SEMANTIC_TIMEOUT`, `SEMANTIC_THRESHOLD`,

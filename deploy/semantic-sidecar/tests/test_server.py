@@ -157,6 +157,17 @@ class ServerTest(unittest.TestCase):
         status, body, _ = h.classify({"texts": ["a"]})
         self.assertEqual((status, body), (504, {"error": "timeout"}))
 
+    def test_late_answer_is_a_timeout_even_if_the_backend_ignores_the_deadline(self):
+        class IgnoresDeadline(FakeBackend):
+            def score(self, texts, *, max_tokens, deadline):
+                time.sleep(0.3)
+                return [0.01] * len(texts)
+
+        h = Harness(IgnoresDeadline(), SIDECAR_INFERENCE_TIMEOUT_SECONDS="0.2")
+        self.addCleanup(h.close)
+        status, body, _ = h.classify({"texts": ["a"]})
+        self.assertEqual((status, body), (504, {"error": "timeout"}))
+
     def test_busy_when_inference_is_occupied(self):
         h = Harness(FakeBackend(delay=1.0), SIDECAR_INFERENCE_TIMEOUT_SECONDS="0.3")
         self.addCleanup(h.close)

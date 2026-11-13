@@ -86,7 +86,7 @@ reproducible checks, without touching the Go service's domain code.
   hash-pinned (`pip --require-hashes`, CPU-only torch wheel).
 - Bounded: body size, texts per request, tokens per text, requests in flight
   (excess gets 503 `overloaded`), open connections, socket timeouts and a
-  per-request inference deadline (504, checked between micro-batches).
+  per-request inference deadline (504, checked after every micro-batch and again before responding).
   Inference is serialized; a request waiting past its deadline gets 503 `busy`.
 - Token limit: the Go client's 510-rune chunk is a heuristic (ADR 0010). The
   sidecar tokenizes with the real tokenizer and rejects, never truncates, a text

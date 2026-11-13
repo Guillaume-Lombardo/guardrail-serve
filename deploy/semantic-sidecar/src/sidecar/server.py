@@ -233,9 +233,10 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(503, "busy", close=False)
             return
         try:
-            scores = validate_scores(
-                backend.score(texts, max_tokens=cfg.max_tokens, deadline=deadline), len(texts)
-            )
+            raw_scores = backend.score(texts, max_tokens=cfg.max_tokens, deadline=deadline)
+            if time.monotonic() >= deadline:  # backend-independent: a late answer is a timeout
+                raise DeadlineExceeded
+            scores = validate_scores(raw_scores, len(texts))
         except TextTooLong as exc:
             self._fail(422, "text_too_long", close=False, index=exc.index)
             return
