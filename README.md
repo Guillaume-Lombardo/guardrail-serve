@@ -223,6 +223,41 @@ Multiple credential headers, including using both header forms, are rejected wit
 set, and never included in authentication errors or logs. Use TLS at the ingress
 and provide keys through the environment, never a committed configuration file.
 
+## Container
+
+The repository ships a multi-stage `Dockerfile` that builds a small, static, non-root image
+(see `docs/adr/0012-container-image.md`).
+
+```bash
+docker build -t guardrail-serve .
+docker run --rm -p 127.0.0.1:8000:8000 guardrail-serve
+curl http://127.0.0.1:8000/health/
+```
+
+- **Build**: Go toolchain image pinned by tag and digest (it must match the `go` directive of
+  `go.mod`), `CGO_ENABLED=0`, `-trimpath -buildvcs=false -ldflags="-s -w"`. The default policies and
+  patterns are embedded in the binary, so no resource file is copied separately.
+- **Runtime**: `gcr.io/distroless/static-debian13:nonroot` (pinned by digest) with CA certificates,
+  no shell and no package manager. The process runs as `65532:65532` from the read-only, root-owned
+  `/app/guardrail-serve` and writes nothing to disk.
+- **Port**: the service listens on `API_PORT` (default `8000`, `EXPOSE 8000`). Publish it on the
+  interface you intend to serve; keep `GUARDRAIL_API_KEYS` set when it is reachable by others.
+- **Configuration**: every setting described in [Runtime configuration](#runtime-configuration)
+  is an environment variable (`docker run -e LOG_FORMAT=json -e GUARDRAIL_API_KEYS=...`).
+  `GUARDRAILS_CONFIG_DIR` must point to a directory mounted into the container and readable by
+  uid `65532` (for example `-v ./config:/config:ro -e GUARDRAILS_CONFIG_DIR=/config`). Pass secrets
+  through the orchestrator's secret mechanism, never bake them into the image.
+- **Health**: `GET <API_PREFIX>/health/` returns `200 {"status":"ok"}` and is exempt from API-key
+  authentication. The image has no `HEALTHCHECK` instruction because it contains no shell or curl:
+  configure the probe in the orchestrator (Kubernetes `httpGet`, load balancer check, or an HTTP
+  probe from a sidecar or auxiliary container).
+- **Signals**: the binary is PID 1 through an exec-form `ENTRYPOINT` and handles `SIGTERM` and
+  `SIGINT` itself: it stops accepting connections and drains requests for up to
+  `HTTP_SHUTDOWN_TIMEOUT` (default `10s`). Set the orchestrator's stop grace period above that value
+  (`docker stop -t 15`).
+- **CI**: `.github/workflows/container.yml` builds the image on pull requests without pushing it;
+  it needs no registry credentials. Publishing is out of scope for now.
+
 ## Logging
 
 Logging uses the Go stdlib `log/slog` stack.

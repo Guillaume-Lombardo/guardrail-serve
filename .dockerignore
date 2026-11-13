@@ -1,0 +1,34 @@
+# Keep the build context minimal and free of secrets. The image only needs
+# go.mod, go.sum, cmd/ and internal/ (embedded resources live in internal/).
+.git
+.gitignore
+.agent-tmp
+archive
+
+# Local configuration and secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*
+.secrets
+
+# Not needed to build the binary
+tests
+docs
+skills
+.github
+.pre-commit-config.yaml
+*.md
+Dockerfile
+.dockerignore
+
+# Editor and OS noise
+.idea
+.vscode
+.DS_Store
+*.swp
