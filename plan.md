@@ -366,3 +366,22 @@ Validated scope, base f3950e90e22a3e8bcb20443ae33f16591d618a13:
 
 Implementation and local proof recorded in the L7b PR. CI/review delivery status
 is authoritative on that PR; leave open and unmerged for full-stop handoff.
+
+## C3 — Invalid-text error contract documentation
+
+Validated scope: align the README and ADR 0013 with the existing HTTP 502
+contract (ADR 0007), without runtime, detector, dependency, CI or environment
+changes. JSON decoding repairs malformed UTF-8 and unpaired UTF-16 surrogates
+to U+FFFD; the existing rejection of literal U+FFFD remains unchanged.
+
+Evidence and regression coverage:
+- Reproduced the documented HTTP 500 expectation against the unchanged runtime:
+  all 24 route/input combinations returned 502 instead (documentation defect).
+- Strengthened the existing end-to-end test to require 502, JSON content type,
+  and exactly `{"detail":"Guardrail execution failed."}` with no sensitive or
+  partial results. Six inputs across four routes retain the prior cases and add
+  the isolated surrogate: the 12 core malformed-UTF-8/surrogate/literal-U+FFFD
+  cases are included.
+- Exact 502 regression assertions pass on the existing implementation; they
+  were not failing runtime tests before this documentation correction.
+- No new architecture decision or environment/configuration contract.
