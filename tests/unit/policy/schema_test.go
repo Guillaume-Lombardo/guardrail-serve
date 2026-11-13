@@ -84,8 +84,10 @@ func TestParseRejectsInvalidCatalogs(t *testing.T) {
 	}{
 		{"empty file", "", "empty"},
 		{"two documents", validPolicies + "---\nversion: 1\n", "exactly one YAML document"},
-		{"missing version", "policies: []\n", "unsupported version 0"},
-		{"future version", "version: 2\npolicies: []\n", "unsupported version 2"},
+		{"missing version", "policies: []\n", "version is required"},
+		{"future version", "version: 2\npolicies: []\n", `unsupported version "2"`},
+		{"fractional version", "version: 1.9\npolicies: []\n", `unsupported version "1.9"`},
+		{"string version", "version: \"1\"\npolicies: []\n", `unsupported version "1"`},
 		{"no policies", "version: 1\npolicies: []\n", "at least one policy"},
 		{"unknown top-level field", "version: 1\nextra: true\npolicies: []\n", "field extra not found"},
 		{"invalid name", "version: 1\npolicies:\n  - name: Bad Name\n    mode: enforce\n" + stages, "name must match"},

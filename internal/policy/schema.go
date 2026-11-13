@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -17,7 +18,7 @@ import (
 const SchemaVersion = 1
 
 type fileSchema struct {
-	Version  int            `yaml:"version"`
+	Version  yaml.Node      `yaml:"version"`
 	Policies []policySchema `yaml:"policies"`
 }
 
@@ -60,8 +61,12 @@ func parse(content []byte, detectors map[string]domain.Detector, defaultMask Mas
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("policy file must contain exactly one YAML document")
 	}
-	if file.Version != SchemaVersion {
-		return nil, fmt.Errorf("unsupported version %d (expected %d)", file.Version, SchemaVersion)
+	// Decode the version as a node: yaml.v3 would truncate 1.9 into an int.
+	if file.Version.Kind == 0 {
+		return nil, fmt.Errorf("version is required (expected %d)", SchemaVersion)
+	}
+	if file.Version.Kind != yaml.ScalarNode || file.Version.ShortTag() != "!!int" || file.Version.Value != strconv.Itoa(SchemaVersion) {
+		return nil, fmt.Errorf("unsupported version %q (expected %d)", file.Version.Value, SchemaVersion)
 	}
 	if len(file.Policies) == 0 {
 		return nil, errors.New("at least one policy is required")
