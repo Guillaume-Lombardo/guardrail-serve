@@ -16,7 +16,7 @@ import (
 // Use a real local HTTP listener and the production router, without a proxy.
 func TestPromptInjectionHTTPScopes(t *testing.T) {
 	handler, err := app.NewHandler(config.Config{
-		SecretMask: "[REDACTED]", LiteLLMGuardrailName: "prompt_injection",
+		SecretMask: "[REDACTED]", LiteLLMDefaultPolicy: "prompt_injection",
 		MaxTextItems: 20, MaxTextChars: 20000,
 	})
 	if err != nil {

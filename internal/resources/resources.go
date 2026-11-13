@@ -32,19 +32,34 @@ func LoadPatterns(overrideDir, name string) ([]guardrails.NamedPattern, error) {
 	return file.Patterns, nil
 }
 
+// PolicyFileName is the policy catalog file, embedded or overridden as a whole.
+const PolicyFileName = "policies.yaml"
+
+// LoadPolicies returns the policy file content and a source label for errors.
+// An override file replaces the embedded catalog entirely; nothing is merged.
+func LoadPolicies(overrideDir string) ([]byte, string, error) {
+	return loadSource(overrideDir, PolicyFileName)
+}
+
 func loadContent(overrideDir, name string) ([]byte, error) {
+	content, _, err := loadSource(overrideDir, name)
+	return content, err
+}
+
+func loadSource(overrideDir, name string) ([]byte, string, error) {
 	if overrideDir != "" {
 		path := filepath.Join(overrideDir, name)
 		if content, err := os.ReadFile(path); err == nil {
-			return content, nil
+			return content, path, nil
 		} else if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("read override %s: %w", path, err)
+			return nil, "", fmt.Errorf("read override %s: %w", path, err)
 		}
 	}
 
-	content, err := defaultsFS.ReadFile(filepath.ToSlash(filepath.Join("defaults", name)))
+	embedded := filepath.ToSlash(filepath.Join("defaults", name))
+	content, err := defaultsFS.ReadFile(embedded)
 	if err != nil {
-		return nil, fmt.Errorf("read embedded %s: %w", name, err)
+		return nil, "", fmt.Errorf("read embedded %s: %w", name, err)
 	}
-	return content, nil
+	return content, "embedded " + embedded, nil
 }

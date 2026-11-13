@@ -8,6 +8,10 @@ import (
 	"github.com/g1lom/guardrail-serve/internal/observability"
 )
 
+// DefaultLiteLLMPolicy is used when neither LITELLM_DEFAULT_POLICY nor the
+// legacy LITELLM_GUARDRAIL_NAME is set.
+const DefaultLiteLLMPolicy = "detect_secret"
+
 type Config struct {
 	Runtime              Runtime
 	APIPrefix            string
@@ -15,7 +19,7 @@ type Config struct {
 	APIVersion           string
 	ProjectName          string
 	SecretMask           string
-	LiteLLMGuardrailName string
+	LiteLLMDefaultPolicy string
 	GuardrailsConfigDir  string
 	MaxTextItems         int
 	MaxTextChars         int
@@ -30,7 +34,7 @@ func Load() Config {
 		APIVersion:           getEnv("API_VERSION", "0.1.0"),
 		ProjectName:          getEnv("PROJECT_NAME", "guardrail-serve"),
 		SecretMask:           getEnv("SECRET_MASK", "[REDACTED]"),
-		LiteLLMGuardrailName: getEnv("LITELLM_GUARDRAIL_NAME", "detect_secret"),
+		LiteLLMDefaultPolicy: getEnv("LITELLM_DEFAULT_POLICY", getEnv("LITELLM_GUARDRAIL_NAME", DefaultLiteLLMPolicy)),
 		GuardrailsConfigDir:  strings.TrimSpace(os.Getenv("GUARDRAILS_CONFIG_DIR")),
 		MaxTextItems:         getEnvInt("MAX_TEXT_ITEMS", 20),
 		MaxTextChars:         getEnvInt("MAX_TEXT_CHARS", 20000),

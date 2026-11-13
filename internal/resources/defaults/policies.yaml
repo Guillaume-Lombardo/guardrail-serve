@@ -1,0 +1,81 @@
+# Policy catalog (schema version 1). See docs/adr/0007-policy-engine-and-findings.md.
+# GUARDRAILS_CONFIG_DIR/policies.yaml replaces this file entirely.
+version: 1
+policies:
+  # Single-detector policies keep the names accepted by LITELLM_GUARDRAIL_NAME.
+  - name: detect_secret
+    description: Mask contextual secrets with SECRET_MASK.
+    mode: enforce
+    stages:
+      input:
+        - detector: detect_secret
+          action: mask
+      output:
+        - detector: detect_secret
+          action: mask
+  - name: detect_pii
+    description: Mask personal data with SECRET_MASK.
+    mode: enforce
+    stages:
+      input:
+        - detector: detect_pii
+          action: mask
+      output:
+        - detector: detect_pii
+          action: mask
+  - name: prompt_injection
+    description: Block deterministic prompt-injection patterns.
+    mode: enforce
+    stages:
+      input:
+        - detector: prompt_injection
+          action: block
+      output:
+        - detector: prompt_injection
+          action: block
+  - name: max_length
+    description: Apply only the MAX_TEXT_ITEMS and MAX_TEXT_CHARS payload limits.
+    mode: enforce
+    stages:
+      input: []
+      output: []
+  - name: default
+    description: Block injections on input, mask secrets and typed personal data on both stages.
+    mode: enforce
+    stages:
+      input:
+        - detector: prompt_injection
+          action: block
+        - detector: detect_secret
+          action: mask
+        - detector: detect_pii
+          action: mask
+          mask: "[{TYPE}]"
+      output:
+        - detector: detect_secret
+          action: mask
+        - detector: detect_pii
+          action: mask
+          mask: "[{TYPE}]"
+        - detector: prompt_injection
+          action: annotate
+  - name: audit
+    description: Shadow evaluation of the default chains; reports findings without changing texts.
+    mode: detect
+    stages:
+      input:
+        - detector: prompt_injection
+          action: block
+        - detector: detect_secret
+          action: mask
+        - detector: detect_pii
+          action: mask
+          mask: "[{TYPE}]"
+      output:
+        - detector: detect_secret
+          action: mask
+        - detector: detect_pii
+          action: mask
+          mask: "[{TYPE}]"
+        - detector: prompt_injection
+          action: annotate
