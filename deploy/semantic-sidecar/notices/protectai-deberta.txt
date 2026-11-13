@@ -1,0 +1,3 @@
+This image contains the model protectai/deberta-v3-base-prompt-injection-v2
+(Apache License 2.0, https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2),
+derived from microsoft/deberta-v3-base (MIT License). It contains no Llama Materials.

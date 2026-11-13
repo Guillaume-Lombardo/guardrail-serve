@@ -477,7 +477,7 @@ A policy naming this detector while disabled fails startup as an unknown detecto
 | `SEMANTIC_TIMEOUT` | `2s` | Positive duration for one text, including all chunk batches |
 | `SEMANTIC_THRESHOLD` | `0.9` | Finite score in (0,1]; equality triggers |
 | `SEMANTIC_FAILURE_MODE` | `closed` | `open` or `closed` |
-| `SEMANTIC_MALICIOUS_LABELS` | `MALICIOUS` | Nonempty comma-separated TEI labels, case-insensitive |
+| `SEMANTIC_MALICIOUS_LABELS` | `MALICIOUS` | Nonempty comma-separated TEI labels, case-insensitive (only `tei_predict`; Prompt Guard 2 checkpoints name their classes `LABEL_0`/`LABEL_1`, so use `LABEL_1`) |
 
 These settings are operator-only. Request metadata, forwarded headers and provider
 params never select URLs, credentials or thresholds. No sidecar auth forwarding
@@ -518,8 +518,8 @@ Llama 4 license in the [primary implementation documentation](https://github.com
 Check the [22M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M)
 and [86M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
 for access, label mapping, license and use restrictions before downloading.
-Nominal FP32 weights alone are roughly 88/344 MB; runtime memory and tokenization
-add overhead. Checkpoints are not bundled. The [TEI supported architectures](https://huggingface.co/docs/text-embeddings-inference/supported_models)
+The FP32 weights are 283 MB (22M) and 1.1 GB (86M, large multilingual vocabulary);
+runtime memory and tokenization add overhead. Checkpoints are not bundled. The [TEI supported architectures](https://huggingface.co/docs/text-embeddings-inference/supported_models)
 do not list mDeBERTa: a TEI `/predict` wire format does **not** establish Prompt Guard
 compatibility with a stock TEI image. Supply a compatible external server or a
 validated custom implementation; no Python runtime, CGO, model or provider is
@@ -527,53 +527,60 @@ required by the Go service or its fixed-fixture/httptest suites. The rune chunk
 heuristic does not guarantee a checkpoint token limit; calibrate the sidecar and
 threshold against your traffic before deployment. See [ADR 0016](docs/adr/0016-semantic-policy-adapter.md).
 
-### Semantic sidecar with a real model (L10)
+### Semantic sidecar with a real model (L10, L11)
 
 [`deploy/semantic-sidecar`](deploy/semantic-sidecar/README.md) is a deployable
 CPU sidecar for the `scores` format: a small bounded Python service (no
 `trust_remote_code`, safetensors only, non-root, read-only filesystem, offline at
 runtime) that serves a prompt-injection classifier on `POST /classify`, with
 `/healthz` and `/readyz`. The default model is
+[`meta-llama/Llama-Prompt-Guard-2-86M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
+(multilingual, pinned commit, weights verified by sha256, labels `LABEL_0`/`LABEL_1`
+with `LABEL_1` malicious and a load-time canary guarding the mapping). It is gated
+and published under the Llama 4 Community License: the build needs your own Hugging
+Face access, passed as a BuildKit secret (`HF_TOKEN`), and this repository ships no
+weights and no image. **Built with Llama.** Llama 4 is licensed under the Llama 4
+Community License, Copyright © Meta Platforms, Inc. All Rights Reserved; read the
+"Llama license and distribution" section of the sidecar README before sharing an
+image. The 22M model is a configuration profile; the previous default
 [`protectai/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2)
-(Apache-2.0, pinned commit, **English only**, no jailbreak detection). Llama
-Prompt Guard 2 is a documented configuration, not a default: it is gated and
-needs the operator's access token and license acceptance. Model, revision and
+(Apache-2.0, English only) stays available as a fallback profile. Model, revision and
 attack labels are configuration; see
-[ADR 0019](docs/adr/0019-real-semantic-sidecar.md) for sources, licenses and
-the TEI decision (stock TEI lists only CamemBERT and XLM-RoBERTa for sequence
-classification).
+[ADR 0019](docs/adr/0019-real-semantic-sidecar.md) (server, TEI decision: stock TEI
+lists only CamemBERT and XLM-RoBERTa for sequence classification) and
+[ADR 0020](docs/adr/0020-llama-prompt-guard-2.md) (model choice, labels, licence).
 
 ```sh
-docker compose -f deploy/semantic-sidecar/compose.yaml up --build   # build host only
+# build host only; HF_TOKEN comes from your secret store, never from a file in the repo
+HF_TOKEN=<token> docker compose -f deploy/semantic-sidecar/compose.yaml up --build
+# no token: the public fallback
+docker compose -f deploy/semantic-sidecar/compose.yaml \
+  --env-file deploy/semantic-sidecar/profiles/deberta-fallback.env up --build
 ```
 
-**Status.** Validated with the real model on the build host (`codex-dev`, head
-`857e02c`): image build, model load, labels (`SAFE`/`INJECTION`), the `scores`
-contract, token limits, container hardening, and the Go service against the sidecar
-(fail-closed 502, fail-open `semantic classifier degraded` warning). The Compose
-stack then ran on the build host at `75cd4d4` (103 of 104 assertions: readiness,
-isolated network, hardening, API, timeouts, restarts); its one failure, the sidecar
-cutting in-flight requests on SIGTERM, is fixed by a bounded drain
-(`SIDECAR_SHUTDOWN_GRACE_SECONDS`, default 20 s; Compose `stop_grace_period: 25s`).
-The targeted Docker retest at `5945c07` validated completion of an in-flight
-request before exit, closed admission and bounded shutdown. The drain covers
-only the current sidecar HTTP request: an analysis spanning multiple chunk
-batches can have its next batch refused during shutdown. The Go service then
-applies its configured failure mode (sanitized 502 when fail-closed, degraded
-pass-through when fail-open).
+**Status.** Validated with the real models on the build host (`codex-dev`,
+13/11/2026, head `eac5f59`): image build with a BuildKit secret, offline load of the
+86M, 22M and DeBERTa checkpoints, the label mapping and canary, the `scores` contract,
+the Compose stack (readiness, isolated network, hardening, bounded drain on SIGTERM)
+and the Go service against the sidecar. The drain covers only the current sidecar HTTP
+request: an analysis spanning multiple chunk batches can have its next batch refused
+during shutdown. The Go service then applies its configured failure mode (sanitized
+502 when fail-closed, degraded pass-through when fail-open).
 
-**French quality (measured, threshold `0.9`).** On the 62-case French injection
-corpus the deterministic detector scores 29 TP / 1 FP / 30 TN / 2 FN (recall 93.5%,
-FPR 3.2%); the default English model alone scores 30 TP / 27 FP / 4 TN / 1 FN
-(96.8% / 87.1%), and the two combined 31 TP / 27 FP / 4 TN / 0 FN (100% / 87.1%).
-On the French cases of the original corpus the deterministic detector is 6 TP /
-0 FP / 33 TN (the six attacks all found) and the model adds no true positive but
-24 false positives (72.7% FPR). As an English control the model flags 12 of 37
-negatives, mostly texts with secrets or PII. It gains two true positives on French
-for 26 more false positives, so it is **not suitable as a French blocking
-detector**. Full table, provenance (commit, threshold, hardware, n, repetitions)
-and limits: [`deploy/semantic-sidecar/EVALUATION.md`](deploy/semantic-sidecar/EVALUATION.md).
-Latency adds about 170 ms p50 / 210-225 ms p95 on 2 shared vCPUs (the
+**Quality (measured, threshold `0.9`, same protocol for each model).** On the 62-case
+French injection corpus the deterministic detector scores 29 TP / 1 FP / 30 TN / 2 FN
+(recall 93.5%, FPR 3.2%). The 86M model alone scores 11 / 4 / 27 / 20 (35.5% / 12.9%)
+and the two combined 30 / 5 / 26 / 1 (96.8% / 16.1%). The previous DeBERTa default
+alone scored 30 / 27 / 4 / 1 (96.8% / 87.1%). On the original corpus (83 cases, French
+and English reported apart in the evaluation) the 86M model alone finds 8 of 13
+attacks with no false positive, and combined with the deterministic detector the
+result is identical to the deterministic detector (13 TP, 1 FP); DeBERTa flagged 36 of
+70 negatives. The 86M model is therefore a low-noise second opinion, not a French
+blocking detector: its false-positive rate on French injection negatives (16.1%) is
+above the 5% bar set beforehand for `block`, so the examples stay in **`annotate`**.
+Full tables, provenance (commit, threshold, hardware, n, repetitions) and limits:
+[`deploy/semantic-sidecar/EVALUATION.md`](deploy/semantic-sidecar/EVALUATION.md).
+Latency adds about 165-170 ms p50 / 200-210 ms p95 on 2 shared vCPUs (the
 deterministic detector takes about 0.3 ms).
 
 **Recommendation.** Keep the semantic detector disabled by default. If you enable
@@ -584,21 +591,24 @@ A policy that explicitly sets the semantic detector to `block` (example
 secret `mask` in the same policy: a text the model calls an injection (typically
 `password=…`) is refused whole instead of being redacted, regardless of the order of the
 detector steps within the same evaluated stage (input and output are evaluated
-separately), in enforce mode. This is a limit of the English model on French and on credential
-texts, not an API defect.
+separately), in enforce mode. With the previous DeBERTa model
+this happened often; the 86M model rarely flags credential texts in the corpora, but the
+precedence rule is unchanged. It is a limit of the models, not an API defect.
 The real-model check is a Go test behind the `realsidecar` build tag (excluded
 from `go test ./...` and from GitHub CI):
 
 ```sh
-SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 \
+SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 SEMANTIC_SIDECAR_FRENCH=1 \
   go test -tags realsidecar ./tests/integration/semantic_sidecar -run TestRealModel -count=1 -v
 ```
 
 **Size `SEMANTIC_TIMEOUT` for your text limit.** On the test host (2 shared vCPUs,
-inference serialized) a 510-character chunk costs about 125 ms. The `2s` Go default
-fails at 12 000 characters; the previous `5s` Compose default fails at 19 000.
-`MAX_TEXT_CHARS=20000` needs **at least 8-10 s at low load** (the Compose stack now
-defaults to `10s`) or a lower `MAX_TEXT_CHARS`; recalibrate under concurrency
+inference serialized) a 510-character chunk costs about 200 ms with the 86M model (L11, French text; the
+older 125 ms figure came from another image and load and is not comparable). 32
+chunks took 6.5 s, so the `2s` Go default fails on texts of about 10 chunks or more.
+`MAX_TEXT_CHARS=20000` is about 40 chunks, roughly 8 s at low load (extrapolated, not
+measured at that size): the Compose default of `10s` leaves little margin, so raise
+`SEMANTIC_TIMEOUT` or lower `MAX_TEXT_CHARS`; recalibrate under concurrency
 (`HTTP_MAX_CONCURRENT_REQUESTS`) and keep `HTTP_WRITE_TIMEOUT` and any upstream
 guardrail timeout above the worst whole request. `SEMANTIC_FAILURE_MODE=closed`
 returns 502 when the sidecar fails, times out or rejects an over-long text; `open`

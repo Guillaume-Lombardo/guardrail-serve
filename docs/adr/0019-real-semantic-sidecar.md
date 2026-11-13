@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted. Validated with the real model on the build host, including French corpus quality (see `deploy/semantic-sidecar/EVALUATION.md`); the Compose stack at the final head remains pending (see "Validation status").
+Accepted. **Amended by [ADR 0020](0020-llama-prompt-guard-2.md)**: the default model is now
+Llama Prompt Guard 2 86M, the DeBERTa model below is the explicit fallback, and the label
+`MALICIOUS` and the claim that no revision could be pinned ("Model" section) are corrected there.
+The rest of this ADR (server, bounds, shutdown, isolation) still applies.
+
+Original status: Validated with the real model on the build host, including French corpus quality (see `deploy/semantic-sidecar/EVALUATION.md`); the Compose stack at the final head remains pending (see "Validation status").
 
 ## Context
 

@@ -6,8 +6,11 @@
 #
 #   docker compose -f deploy/semantic-sidecar/compose.yaml up --build
 #
-# Gated models (Llama Prompt Guard 2): add compose.gated.yaml and export HF_TOKEN
-# in the build shell; the token is a BuildKit secret, never an argument or env of the image.
+# The default model (Llama Prompt Guard 2 86M) is gated: export HF_TOKEN in the build
+# shell only. It is a BuildKit secret, never an argument or environment of the image, and
+# the runtime is offline. Other pinned models: --env-file profiles/<name>.env
+# (the public fallback needs no token). Read docs/adr/0020-llama-prompt-guard-2.md first:
+# the image contains Llama Materials (Llama 4 Community License).
 name: guardrail-semantic
 
 services:
@@ -45,12 +48,20 @@ services:
     build:
       context: .
       args:
-        MODEL_ID: ${SIDECAR_MODEL_ID:-protectai/deberta-v3-base-prompt-injection-v2}
-        MODEL_REVISION: ${SIDECAR_MODEL_REVISION:-90c9989b1a342275dd0d1a95aad283c04e075671}
-        MODEL_SAFETENSORS_SHA256: ${SIDECAR_MODEL_SAFETENSORS_SHA256-6521cb8d0ac08148c81464899c424e6148fcc62befa371089fa4061d8b6e0424}
+        MODEL_ID: ${SIDECAR_MODEL_ID:-meta-llama/Llama-Prompt-Guard-2-86M}
+        MODEL_REVISION: ${SIDECAR_MODEL_REVISION:-a8ded8e697ce7c355e395a0df51f94adb4a2fd27}
+        MODEL_SAFETENSORS_SHA256: ${SIDECAR_MODEL_SAFETENSORS_SHA256-e72017dbbe89c1232dcbc4a74ce0c389db5b468c42afd05850347b2a8c5f6b09}
+        MODEL_NOTICE: ${SIDECAR_MODEL_NOTICE:-notices/llama4.txt}
+        IMAGE_LICENSES: ${SIDECAR_IMAGE_LICENSES:-MIT AND LicenseRef-Llama-4-Community-License}
+        MODEL_ATTRIBUTION: ${SIDECAR_MODEL_ATTRIBUTION:-Built with Llama}
+      # Absent or empty token: public models still build; the gated default fails cleanly.
+      secrets:
+        - hf_token
     image: guardrail-serve-semantic-sidecar:local
     environment:
-      SIDECAR_MALICIOUS_LABELS: ${SIDECAR_MALICIOUS_LABELS:-INJECTION}
+      # The 86M and 22M checkpoints ship no id2label: LABEL_1 is the malicious class.
+      SIDECAR_MALICIOUS_LABELS: ${SIDECAR_MALICIOUS_LABELS:-LABEL_1}
+      SIDECAR_VERIFY_LABELS: ${SIDECAR_VERIFY_LABELS:-true}
       SIDECAR_MAX_TOKENS: ${SIDECAR_MAX_TOKENS:-512}
       SIDECAR_MAX_TEXTS: ${SIDECAR_MAX_TEXTS:-32}
       SIDECAR_MAX_BODY_BYTES: ${SIDECAR_MAX_BODY_BYTES:-1048576}
@@ -80,3 +91,7 @@ services:
 networks:
   sidecar:
     internal: true
+
+secrets:
+  hf_token:
+    environment: HF_TOKEN

@@ -3,22 +3,25 @@
 A small, bounded HTTP service that runs a prompt-injection classifier on CPU
 and speaks the `scores` contract of the Go
 [HTTP classifier](../../internal/semantic/httpclassifier/README.md). Design and
-rationale: [ADR 0019](../../docs/adr/0019-real-semantic-sidecar.md).
+rationale: [ADR 0019](../../docs/adr/0019-real-semantic-sidecar.md); model choice,
+label mapping and licensing: [ADR 0020](../../docs/adr/0020-llama-prompt-guard-2.md).
 
-> **Validation status.** Validated with the real model on the build host
-> (`codex-dev`, head `857e02c`): image build, model load, label mapping, the
-> `scores` contract, token limits, container hardening, the Go service against the
-> sidecar (fail-closed 502, fail-open warning) and the latencies below.
-> The Compose stack was run on the build host at head `75cd4d4` (103 of 104
-> assertions): `depends_on`/readiness, the `internal: true` network (egress blocked),
-> hardening, the contract with the real model, the guardrail API, timeouts and
-> restarts. The one failure, the sidecar cutting in-flight requests on SIGTERM, is
-> fixed by the bounded drain in "Shutdown". The targeted Docker retest at
-> `5945c07` validated in-flight completion, closed admission and bounded shutdown;
-> process-level tests also cover the drain with a fake backend. The default model is
-> English only and was measured on the French corpora: at threshold `0.9` it adds 2
-> true positives and 26 false positives on the French injection corpus, so it is
-> not suitable as a French blocking detector (use `annotate`). See
+> **Built with Llama.** The default model, Llama Prompt Guard 2 86M, is distributed by
+> Meta under the Llama 4 Community License. Llama 4 is licensed under the Llama 4
+> Community License, Copyright © Meta Platforms, Inc. All Rights Reserved. An image
+> built here contains those weights: read "Llama license and distribution" below
+> before sharing one. This repository ships no weights.
+
+> **Validation status.** Validated with the real models on the build host (`codex-dev`,
+> 13/11/2026, head `eac5f59`): image build with a BuildKit secret, offline load of the
+> 86M, 22M and DeBERTa checkpoints, label mapping and the load-time canary, the `scores`
+> contract, token limits, the Compose stack with container hardening, the bounded drain
+> on `SIGTERM` (peak memory 1247 MiB under the 2 GiB limit), the Go `TestRealModel`, and
+> the evaluation on the French injection corpus and the original corpus. Earlier L10
+> validations of the server (fail-closed 502, fail-open warning, graceful stop) are
+> unchanged by this model switch. At threshold `0.9` the 86M model adds one true
+> positive and four false positives to the deterministic detector on the French
+> injection corpus, so the example policies keep it in `annotate`. See
 > [EVALUATION.md](EVALUATION.md) and "Measured results and limits".
 
 ## Contract
@@ -49,43 +52,66 @@ tokens and rejects over-long texts with 422 instead of truncating; with
 ## Models
 
 Select the model by build arguments and `SIDECAR_*` variables
-([`sidecar.env.template`](sidecar.env.template)). The revision is always a full
-commit hash. Labels are checked against the checkpoint at startup.
+([`sidecar.env.template`](sidecar.env.template)); [`profiles/`](profiles) holds the
+pinned alternatives. The revision is always a full commit hash and the weights'
+sha256 is verified at build. Labels are checked against the checkpoint at startup,
+and a canary check refuses a model whose mapping is inverted (see "Label mapping").
 
-| Model | License | Gated | Attack label | Notes |
-| --- | --- | --- | --- | --- |
-| [`protectai/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2) (default, rev `90c9989b1a34`) | Apache-2.0 | no | `INJECTION` (`SAFE` = benign) | English only; no jailbreak detection; avoid on system prompts; upstream archived. |
-| [`meta-llama/Llama-Prompt-Guard-2-86M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M) / [`22M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M) | Llama 4 Community License | yes | `MALICIOUS` (documented; verify against `id2label`) | Operator must accept the license and obtain access; the revision is not pinned here. A baked image carries the license obligations. |
+| Model | License | Gated | Attack label | Revision | `model.safetensors` sha256 | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| [`meta-llama/Llama-Prompt-Guard-2-86M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M) (**default**) | Llama 4 Community License | yes | `LABEL_1` (`LABEL_0` = benign) | `a8ded8e697ce` | `e72017dbbe89` | mDeBERTa-v3-base, multilingual (Meta evaluated English, French, German, Hindi, Italian, Portuguese, Spanish, Thai), binary, 512 tokens, 1.1 GB of weights. |
+| [`meta-llama/Llama-Prompt-Guard-2-22M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M) (`profiles/prompt-guard-2-22m.env`) | Llama 4 Community License | yes | `LABEL_1` | `11614a155199` | `5120e30bcd53` | DeBERTa-v3-xsmall, English pretraining: Meta documents a larger gap on multilingual text. 283 MB of weights. |
+| [`protectai/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2) (`profiles/deberta-fallback.env`) | Apache-2.0 | no | `INJECTION` (`SAFE` = benign) | `90c9989b1a34` | `6521cb8d0ac0` | Previous default and fallback: English only; no jailbreak detection; avoid on system prompts; upstream archived. |
 
 Thresholds belong to the Go service (`SEMANTIC_THRESHOLD`, default `0.9`); the
 sidecar returns probabilities. Calibrate the threshold per model on your own
 data. Vendor metrics are not a calibration.
+
+### Label mapping
+
+Both Prompt Guard 2 checkpoints are **binary** (benign / malicious) and their
+`config.json` has **no `id2label`**: transformers names the classes `LABEL_0` and
+`LABEL_1`. The model card's example comments the output as `MALICIOUS`, which the
+checkpoint does not contain (an earlier version of these docs repeated it).
+`LABEL_1` is the malicious class (checked on the real model, ADR 0020), so the
+default is `SIDECAR_MALICIOUS_LABELS=LABEL_1` and the score is the softmax
+probability of `LABEL_1`. A checkpoint with several attack classes (for example
+benign / injection / jailbreak) is configured by listing every attack label; their
+probabilities are summed. At load time the sidecar also scores one canary attack
+and one canary benign text and aborts if the attack is below 0.5 or the benign text
+is not below it (`SIDECAR_VERIFY_LABELS=false` turns this off for a model that is not
+meant to flag the canary); this catches an inverted mapping, not poor quality.
 
 ## Build and run
 
 Docker builds belong on the designated build host (not on docker-box).
 
 ```sh
-# Default model (no token needed)
+# Default model (Prompt Guard 2 86M, gated): the token is a BuildKit secret, never an
+# argument or environment of the image. Export it in your build shell only and do not
+# write it to a file in the repository. The account needs access to the gated repository.
+export HF_TOKEN=...
 docker compose -f deploy/semantic-sidecar/compose.yaml up --build
 
-# Gated model: the token is a BuildKit secret, never an argument or environment of the image
-export HF_TOKEN=...   # in your shell only; do not write it to a file in the repo
-SIDECAR_MODEL_ID=meta-llama/Llama-Prompt-Guard-2-86M \
-SIDECAR_MODEL_REVISION=<verified 40-char commit> \
-SIDECAR_MODEL_SAFETENSORS_SHA256= \
-SIDECAR_MALICIOUS_LABELS=MALICIOUS \
-docker compose -f deploy/semantic-sidecar/compose.yaml -f deploy/semantic-sidecar/compose.gated.yaml up --build
+# 22M option or public fallback: pinned profiles (the fallback needs no token)
+docker compose -f deploy/semantic-sidecar/compose.yaml \
+  --env-file deploy/semantic-sidecar/profiles/prompt-guard-2-22m.env up --build
+docker compose -f deploy/semantic-sidecar/compose.yaml \
+  --env-file deploy/semantic-sidecar/profiles/deberta-fallback.env up --build
 ```
 
-The build prints the downloaded `model.safetensors` sha256; pin it in
-`SIDECAR_MODEL_SAFETENSORS_SHA256` afterwards. The default model's hash is
-pinned and verified.
+Without Compose, pass the token as a BuildKit secret file or pipe it, for example
+`docker build --secret id=hf_token,src=<file outside the repository, mode 0600> ...`
+or `... | docker build --secret id=hf_token,src=/dev/stdin ...`. An absent or empty
+token still builds a public model; the gated default then fails with a sanitized
+message. The build verifies the `model.safetensors` sha256 against the pinned value
+and prints it. Any other model must give its own full commit hash, sha256 and labels.
 
 Runtime facts: non-root (65532), read-only root filesystem, capabilities
 dropped, no published port, memory limit 2 GB / 2 CPUs, offline
-(`HF_HUB_OFFLINE=1`), `HEALTHCHECK` on `/readyz`. Observed on `codex-dev` with
-these limits: 365-530 MiB idle, 1.29 GiB peak under maximum load.
+(`HF_HUB_OFFLINE=1`), `HEALTHCHECK` on `/readyz`. Memory observed on `codex-dev` with
+the DeBERTa fallback under these limits: 365-530 MiB idle, 1.29 GiB peak under maximum
+load; see "Measured results and limits" for Prompt Guard 2 86M.
 
 Network isolation (Compose): the sidecar is attached only to a `sidecar` network
 declared `internal: true`, so it has no route outside the stack; the `guardrail`
@@ -113,10 +139,11 @@ CPython 3.13 virtual environment, download the snapshot with
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SIDECAR_HOST` / `SIDECAR_PORT` | `127.0.0.1` / `8080` | Bind address (the image sets `0.0.0.0`). |
-| `SIDECAR_MODEL_ID` | default model | Hub id (used only without `SIDECAR_MODEL_PATH`). |
+| `SIDECAR_MODEL_ID` | `meta-llama/Llama-Prompt-Guard-2-86M` | Hub id (used only without `SIDECAR_MODEL_PATH`). |
 | `SIDECAR_MODEL_REVISION` | pinned for the default | Full lowercase 40-hex commit; required for other models without a local path. |
 | `SIDECAR_MODEL_PATH` | empty | Local snapshot directory (set to `/models/model` in the image). |
-| `SIDECAR_MALICIOUS_LABELS` | `INJECTION` | Comma-separated, case-insensitive; required for non-default models. |
+| `SIDECAR_MALICIOUS_LABELS` | `LABEL_1` | Comma-separated, case-insensitive attack classes; required for non-default models (the DeBERTa fallback uses `INJECTION`). |
+| `SIDECAR_VERIFY_LABELS` | `true` | Load-time canary: refuse to start if one canary attack does not score >= 0.5 or one canary benign text does not score < 0.5. |
 | `SIDECAR_MAX_BODY_BYTES` | `1048576` | Largest accepted body. |
 | `SIDECAR_MAX_TEXTS` | `32` | Texts per request (matches the client batch size). |
 | `SIDECAR_MAX_TOKENS` | `512` | Real tokens per text incl. special tokens; cannot exceed the model's positions. |
@@ -161,45 +188,84 @@ would cut the longest requests). If you raise the inference deadline or the batc
 size, raise both values. Events on stderr: `draining`, `stopped_accepting`, then
 `drained` or `drain_timeout`.
 
+## Llama license and distribution
+
+Read from the checkpoints at the pinned revisions (the `LICENSE` file, identical for
+the 86M and 22M repositories, sha256 `73755cee…2917`): the **Llama 4 Community
+License Agreement**, effective April 5, 2025, plus the Llama 4 Acceptable Use Policy
+(`USE_POLICY.md`). The model repository's metadata says `license: other`,
+`license_name: llama4`. Summary of what it asks of someone who **distributes or makes
+available** the weights or a product containing them (this is not legal advice; the
+license text prevails):
+
+| Obligation | How this deployment meets it |
+| --- | --- |
+| Give recipients a copy of the agreement | The download keeps `LICENSE` and `USE_POLICY.md`; the image carries them in `/models/model/`. |
+| Keep the attribution notice in a "Notice" text file | `notices/llama4.txt` is copied to `/models/NOTICE` ("Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved."). The repository `NOTICE` has the same text. |
+| Display "Built with Llama" on a related website, user interface, blog post, about page or product documentation | This README, the root README and ADR 0020 state it; the image label `io.guardrail-serve.model.attribution` carries it. An operator who exposes a product built on this image must display it in their own documentation or interface. |
+| Comply with the Acceptable Use Policy and applicable law | Operator responsibility. |
+| Name any AI model trained or improved with Llama outputs "Llama ..." | Not applicable: nothing is trained or fine-tuned here. |
+| More than 700 million monthly active users need a separate license from Meta | Operator responsibility. |
+
+Using the weights requires the operator's own Hugging Face account to have been granted
+access to the gated repositories (a license acceptance made by that account). No image
+is published from this project and no weights are in this repository; whoever pushes or
+shares an image built from here becomes the distributor and owns these obligations. The
+repository's MIT license does not apply to the weights. The fallback model is Apache-2.0
+and carries no Llama obligation (`profiles/deberta-fallback.env` swaps the notice).
+
 ## Measured results and limits
 
 Measured on `codex-dev` (2 vCPU, `SIDECAR_TORCH_THREADS=2`, 2 GiB limit, a VM
 shared with other agents, so figures are on the pessimistic side) with the image
-built from head `857e02c`, model revision `90c9989b1a34`, English text. Few
-repetitions for the large batches (n = 2-4). These are single-host latency
-figures, not a capacity guarantee.
+built from head `eac5f59`, 13/11/2026, French text (a repeated 510-character
+sentence). Few repetitions for the large batches (n = 3-4). These are single-host
+latency figures, not a capacity guarantee.
 
-| Workload sent to `/classify` | p50 | p95 / max |
-| --- | --- | --- |
-| 1 short text (30 characters) | 120 ms | 146 ms |
-| 1 chunk of 510 characters (n=15) | 209 ms | 236 ms |
-| 1 text of 512 tokens | 977 ms | 1328 ms |
-| 4 chunks | 532 ms | 599 ms |
-| 8 chunks | 1005 ms | 1298 ms |
-| 16 chunks | 1981 ms | 1993 ms |
-| 32 chunks (largest client batch) | 4018 ms | 4154 ms |
-| 32 texts of 512 tokens (worst case) | - | 504 after 16.3 s |
+| Workload sent to `/classify` | 86M p50 | 86M p95 / max | 22M p50 | DeBERTa p50 |
+| --- | --- | --- | --- | --- |
+| 1 short text (30 characters, n=15) | 115 ms | 159 ms | 30 ms | 106 ms |
+| 1 chunk of 510 characters (n=15) | 263 ms | 302 ms | 89 ms | 275 ms |
+| 4 chunks | 899 ms | 974 ms | 299 ms | 876 ms |
+| 8 chunks | 1604 ms | 2046 ms | 604 ms | 1671 ms |
+| 16 chunks | 3148 ms | 3455 ms | 1169 ms | 3296 ms |
+| 32 chunks (largest client batch) | 6509 ms | 6718 ms | 2269 ms | 6929 ms |
+| 1 text at the token limit (399 words) | 1105 ms | - | 313 ms (401 words) | 827 ms (299 words) |
+| 32 texts at the token limit (worst case) | - | 504 after 17.8 s | 504 after 12.2 s | 504 after 16.3 s |
 
-That is about 125 ms per 510-character chunk, linear. Other results: ready 3.6-4.3 s
-after start; labels `SAFE`/`INJECTION` confirmed, score = probability of
-`INJECTION`, order-independent; a text of 510 `a` characters accepted, 511 rejected with 422
-(`text_too_long`, no truncation); a 510-rune CJK chunk is rejected (422), 510
-emoji are accepted; the Go test `TestRealModel` and the Go service passed
-(`SEMANTIC_TIMEOUT=2s`, closed: attack blocked in 0.18 s, 6 000 characters in
-1.84 s, **12 000 characters 502**; `5s`: 12 000 characters 200 in 3.48 s,
-**19 000 characters 502**; closed with a 50 ms timeout returns 502 with no URL or
-text; open returns 200 and logs `semantic classifier degraded`). Six parallel
-8-chunk requests: two got 503 (`SIDECAR_MAX_INFLIGHT=4`), the other four were
-served one after another in 1.3-4.1 s: **inference is serialized**, about 8
-chunks per second in total.
+That is about 200 ms per 510-character chunk for the 86M model (about 70 ms for the
+22M model), linear. The earlier L10 figure of 125 ms per chunk (DeBERTa, English
+text, a quieter VM, another image) is **not comparable**: the texts, the load and the
+tokenizer differ, and the DeBERTa column above, measured now with the same script,
+is close to the 86M column. Size `SEMANTIC_TIMEOUT` from the current columns.
 
-French corpus quality was measured separately (threshold `0.9`, same image):
-[EVALUATION.md](EVALUATION.md) has the table, provenance and limits. In short, the
-model adds 2 true positives and 26 false positives on the 62-case French injection
-corpus, and about 170 ms p50 per sequential request through the Go service.
+Other results: ready 3.6 to 4.4 s after start; the 86M labels are
+`LABEL_0`/`LABEL_1` (no `id2label` in the checkpoint), score = probability of
+`LABEL_1`, confirmed by the load-time canary and by the Go test; mapping the
+malicious class to `LABEL_0` makes the sidecar refuse to start, and naming a label
+`MALICIOUS` fails at load; `TestRealModel` passes with `SEMANTIC_SIDECAR_FRENCH=1`
+(benign text about 0.0004, attacks 0.998 to 0.9996, a 7-chunk text in 920 ms);
+token and length limits (511 characters rejected with 422, no truncation) are the
+server's, not the model's, and are covered by the unit tests. Inference is serialized
+(two concurrent clients: 268 ms p50 for 62 requests in 8.6 s, no error). Memory:
+about 1 GiB resident during the evaluation (peak 1025 MiB), 1247 MiB at the peak of
+the Compose run including model load.
 
-Not validated: the Docker retest of the graceful stop after the fix described in
-"Shutdown", other CPUs or higher concurrency, other models or thresholds.
+The earlier L10 measurements on DeBERTa for the Go service (closed/open behaviour,
+`SEMANTIC_TIMEOUT` outcomes for 6 000, 12 000 and 19 000 characters) were not
+re-run: they depend on the server and the client, not on the model, but the time
+per chunk has changed (see above), so the break-even text sizes move with it.
+
+French and original-corpus quality was measured separately (threshold `0.9`, same
+protocol for the three models): [EVALUATION.md](EVALUATION.md) has the tables,
+provenance and limits. In short, with the 86M model the sidecar alone finds 11 of the
+31 French injection attacks (4 false positives out of 31) and, combined with the
+deterministic detector, 30/31 with 5 false positives; on the original corpus it adds
+nothing and flags nothing. About 170 ms p50 per sequential request through the Go
+service.
+
+Not validated: other CPUs or higher concurrency, other thresholds, other models than
+the three above.
 
 ### Choosing `SEMANTIC_TIMEOUT` for your text limit
 
@@ -264,23 +330,25 @@ legitimate texts do not time out, and cap the number of concurrent callers.
 ## Validate with the real model
 
 Run on the designated build host, never on docker-box. Last run: `codex-dev`,
-head `857e02c`, all steps passed (plain `docker run`; the Compose stack was not
-run):
+head `eac5f59`, all steps passed with the real 86M image. The HF token comes from
+your secret store and goes through a pipe, never a command-line argument:
 
 ```sh
-docker compose -f deploy/semantic-sidecar/compose.yaml build semantic-sidecar
+# build (token on stdin of the BuildKit secret; nothing is written to disk)
+<secret-store read command> | docker build --secret id=hf_token,src=/dev/stdin \
+  -t guardrail-serve-semantic-sidecar:local deploy/semantic-sidecar
 docker run --rm -d --name semantic-sidecar-check -p 127.0.0.1:18080:8080 \
   --read-only --tmpfs /tmp:size=64m --cap-drop ALL --security-opt no-new-privileges \
-  -e SIDECAR_MALICIOUS_LABELS=INJECTION guardrail-serve-semantic-sidecar:local
+  guardrail-serve-semantic-sidecar:local
 # wait for GET http://127.0.0.1:18080/readyz to return 200, then:
-SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 \
+SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 SEMANTIC_SIDECAR_FRENCH=1 \
   go test -tags realsidecar ./tests/integration/semantic_sidecar -run TestRealModel -count=1 -v
 docker stop semantic-sidecar-check
 ```
 
 `TestRealModel` is excluded from `go test ./...` and from GitHub CI. It checks
-readiness, real label mapping and that a long multi-chunk text is accepted, and
-logs scores and elapsed time.
+readiness, real label mapping, French samples (with `SEMANTIC_SIDECAR_FRENCH=1`) and
+that a long multi-chunk text is accepted, and logs scores and elapsed time.
 
 Recall, false-positive rate and latency on a labeled JSONL file (any corpus):
 
@@ -310,7 +378,7 @@ size and repetitions, and never choose the threshold on the corpus you report.
   the PyTorch CPU index page.
 - Direct pins: `transformers==4.57.6`, `tokenizers==0.22.2`,
   `huggingface-hub==0.36.2`, `safetensors==0.8.0`, `torch==2.9.1+cpu`.
-- Model: pinned commit and verified `model.safetensors` sha256.
+- Model: pinned commit and verified `model.safetensors` sha256 (table in "Models").
 
 ## Tests
 

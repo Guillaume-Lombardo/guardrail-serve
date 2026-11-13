@@ -14,7 +14,7 @@ sys.path.insert(0, HERE)
 
 from fake_backend import TRIGGER, FakeBackend  # noqa: E402
 from sidecar.backend import DeadlineExceeded, resolve_label_indices, run_in_microbatches, validate_scores  # noqa: E402
-from sidecar.config import DEFAULT_MODEL_REVISION, Config, ConfigError  # noqa: E402
+from sidecar.config import DEFAULT_MODEL_ID, DEFAULT_MODEL_REVISION, Config, ConfigError  # noqa: E402
 from sidecar.server import Application, BoundedServer  # noqa: E402
 
 SECRET_TEXT = "PRIVATE-INPUT-MARKER sk-live-123456"
@@ -305,9 +305,26 @@ class MicrobatchDeadlineTest(unittest.TestCase):
 class ConfigTest(unittest.TestCase):
     def test_defaults_pin_the_default_model(self):
         cfg = Config.from_env({})
+        self.assertEqual(cfg.model_id, DEFAULT_MODEL_ID)
+        self.assertEqual(cfg.model_id, "meta-llama/Llama-Prompt-Guard-2-86M")
         self.assertEqual(cfg.model_revision, DEFAULT_MODEL_REVISION)
-        self.assertEqual(cfg.malicious_labels, ("INJECTION",))
+        self.assertEqual(cfg.model_revision, "a8ded8e697ce7c355e395a0df51f94adb4a2fd27")
+        # The checkpoint ships no id2label: transformers names its two classes LABEL_0/LABEL_1.
+        self.assertEqual(cfg.malicious_labels, ("LABEL_1",))
+        self.assertTrue(cfg.verify_labels)
         self.assertEqual(cfg.host, "127.0.0.1")
+
+    def test_label_check_can_be_disabled_explicitly(self):
+        self.assertFalse(Config.from_env({"SIDECAR_VERIFY_LABELS": "false"}).verify_labels)
+        self.assertTrue(Config.from_env({"SIDECAR_VERIFY_LABELS": "true"}).verify_labels)
+        with self.assertRaises(ConfigError):
+            Config.from_env({"SIDECAR_VERIFY_LABELS": "maybe"})
+
+    def test_previous_default_is_now_an_explicit_fallback(self):
+        # Without labels, a non-default model must fail loudly instead of inheriting LABEL_1.
+        with self.assertRaises(ConfigError):
+            Config.from_env({"SIDECAR_MODEL_ID": "protectai/deberta-v3-base-prompt-injection-v2",
+                             "SIDECAR_MODEL_REVISION": "90c9989b1a342275dd0d1a95aad283c04e075671"})
 
     def test_custom_model_requires_revision_and_labels(self):
         with self.assertRaises(ConfigError):
@@ -341,6 +358,22 @@ class LabelTest(unittest.TestCase):
         self.assertEqual(resolve_label_indices({0: "SAFE", 1: "INJECTION"}, ["injection"]), [1])
         self.assertEqual(resolve_label_indices({0: "BENIGN", 1: "MALICIOUS", 2: "JAILBREAK"},
                                                ["MALICIOUS", "jailbreak"]), [1, 2])
+
+    def test_prompt_guard_2_binary_checkpoint_without_id2label(self):
+        # transformers names the classes of a checkpoint without id2label LABEL_0/LABEL_1;
+        # the model card's "MALICIOUS" does not exist in the checkpoint config.
+        id2label = {0: "LABEL_0", 1: "LABEL_1"}
+        self.assertEqual(resolve_label_indices(id2label, ["LABEL_1"]), [1])
+        for labels in (["MALICIOUS"], ["BENIGN"], ["LABEL_0", "LABEL_1"]):
+            with self.subTest(labels), self.assertRaises(ValueError):
+                resolve_label_indices(id2label, labels)
+
+    def test_three_class_checkpoint_sums_the_declared_attack_classes(self):
+        # Prompt Guard 1 style: BENIGN / INJECTION / JAILBREAK. Both attack classes count.
+        id2label = {0: "BENIGN", 1: "INJECTION", 2: "JAILBREAK"}
+        self.assertEqual(resolve_label_indices(id2label, ["INJECTION", "JAILBREAK"]), [1, 2])
+        with self.assertRaises(ValueError):
+            resolve_label_indices(id2label, ["BENIGN", "INJECTION", "JAILBREAK"])
 
     def test_wrong_mapping_fails_loudly(self):
         for labels in (["MALICIOUS"], ["SAFE", "INJECTION"], []):

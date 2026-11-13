@@ -97,11 +97,12 @@ classification model.
 
 ### Label mapping for Prompt Guard 2
 
-Prompt Guard 2 (22M and 86M) is a binary classifier: `BENIGN` or `MALICIOUS`.
-Its model card shows the `MALICIOUS` name; a sidecar whose checkpoint lacks
-`id2label` exposes `LABEL_0` (benign) and `LABEL_1` (malicious) instead. Check
-the labels the sidecar actually returns and set `MaliciousLabels` to match,
-for example `[]string{"LABEL_1"}`. A multilabel model can list several labels;
+Prompt Guard 2 (22M and 86M) is a binary classifier. The model card speaks of
+"benign" and "malicious" prompts, but the published checkpoints declare no
+`id2label` (verified on both at their pinned revisions, ADR 0020): a server using
+`transformers` exposes `LABEL_0` (benign) and `LABEL_1` (malicious). Check the
+labels the server actually returns and set `MaliciousLabels` to match, for
+example `[]string{"LABEL_1"}`. A multilabel model can list several labels;
 the highest of them wins.
 
 ## Chunking

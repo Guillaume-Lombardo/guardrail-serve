@@ -298,3 +298,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+===============================================================================
+4. Llama Prompt Guard 2 (model weights, not included in this repository)
+===============================================================================
+
+Component: meta-llama/Llama-Prompt-Guard-2-86M (default) and
+           meta-llama/Llama-Prompt-Guard-2-22M (option)
+Source:    https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M
+           https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M
+Revisions: 86M a8ded8e697ce7c355e395a0df51f94adb4a2fd27,
+           22M 11614a155199674a0a95e6602d6ab0417b790ed0
+License:   Llama 4 Community License Agreement (effective April 5, 2025), the
+           text shipped as the LICENSE file of each checkpoint. Use must also
+           comply with the Llama 4 Acceptable Use Policy
+           (https://www.llama.com/llama4/use-policy).
+Use:       deploy/semantic-sidecar downloads the weights at image build time
+           with the operator's own Hugging Face access and runs them as a
+           classifier. This repository contains no weights and no Meta code.
+           The MIT License of this repository does not cover them.
+
+Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved.
+
+Built with Llama.
+
+An image built from deploy/semantic-sidecar contains Llama Materials. Whoever
+distributes or makes such an image available must provide a copy of the
+agreement (the image carries it in /models/model/LICENSE), keep this notice
+(the image carries it in /models/NOTICE) and display "Built with Llama" in the
+related documentation. See docs/adr/0020-llama-prompt-guard-2.md.
+
+The Prompt Guard 2 models are built on microsoft/mdeberta-v3-base (86M) and
+microsoft/deberta-v3-xsmall (22M), MIT-licensed, as stated by Meta.
+
+Fallback model (not Llama Materials): protectai/deberta-v3-base-prompt-injection-v2,
+Apache License 2.0, https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2.
