@@ -148,3 +148,55 @@ func TestRuntimeNetworkHeaderBound(t *testing.T) {
 		t.Fatalf("got %d want 431", res.StatusCode)
 	}
 }
+
+func TestMetricsRuntimeAdmissionAndPrefix(t *testing.T) {
+	cfg := config.Load()
+	cfg.APIPrefix = "/api"
+	cfg.Runtime.APIKeys = []string{"fixture"}
+	handler, err := NewHandler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path, key string
+		status    int
+	}{
+		{"/api/metrics", "", 401}, {"/api/metrics", "fixture", 200}, {"/api/health/", "", 200},
+	} {
+		r := httptest.NewRequest("GET", tc.path, nil)
+		if tc.key != "" {
+			r.Header.Set("X-API-Key", tc.key)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("%s: %d", tc.path, w.Code)
+		}
+	}
+	cfg.APIPrefix = ""
+	cfg.Runtime.MaxConcurrentRequests = 1
+	started, release := make(chan struct{}), make(chan struct{})
+	h := runtimeHandler(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hold" {
+			close(started)
+			<-release
+		}
+		w.WriteHeader(204)
+	}))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r := httptest.NewRequest("GET", "/hold", nil)
+		r.Header.Set("X-API-Key", "fixture")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+	<-started
+	defer func() { close(release); <-done }()
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("X-API-Key", "fixture")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 503 {
+		t.Fatalf("scrape bypassed admission: %d", w.Code)
+	}
+}

@@ -301,3 +301,82 @@ pre-commit run --all-files
 2. Create or connect the GitHub repository.
 3. Push the initial `main` branch.
 4. After bootstrap, do all further work on dedicated branches with PRs, CI, and review.
+
+### Normalized deterministic detection
+
+PII and prompt-injection rules scan an NFKC view with zero-width and bidi
+formatting controls removed. English and French hostile instruction overrides,
+system-prompt disclosure and hostile tool use are covered by deterministic
+patterns; ordinary requests such as “list the tools I need to build a shed”
+pass. These patterns are bounded heuristics, not a semantic safety guarantee.
+Secret detection is unchanged.
+
+Matches map back to the original bytes through `internal/textnorm`; API findings
+use original rune offsets. Masks replace whole original grapheme clusters.
+Ligature expansions can produce overlapping findings, merged deterministically
+by the policy engine. Clean text, detect-mode text and annotated text retain
+all original characters, including formatting and decomposed accents.
+
+PII rules accept an optional `validator` field: `payment_card`, `iban`, `fr_nir`,
+`fr_siren`, or `fr_siret`; unknown validators fail startup. Embedded card rules
+require Luhn (12–19 digits), IBAN rules require registered country format and
+MOD 97, and French identifiers use the shared NIR/SIREN/SIRET validators.
+NIR/SIREN/SIRET require their contextual labels (NIR also accepts “sécurité
+sociale” and “numéro de sécurité sociale”) to avoid treating arbitrary numeric
+sequences as identifiers. A labeled French identifier is not also treated as a
+payment card. ASCII spaces/hyphens may separate identifier characters; NFKC
+also accepts compatibility spaces and digits. Invalid checksums are discarded.
+IPv4 literals remain detectable, except immediately after `version`, `release`,
+`ver`, or `v` with optional spacing and `:`, `=`, `-` separators. Card matches
+end at the last digit and preserve following spaces.
+
+PII/injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
+error, before returning any detections. JSON decoding replaces malformed UTF-8
+and unpaired UTF-16 surrogates with U+FFFD; these decoded texts therefore also
+fail closed through the existing detector-error HTTP response (500), without
+texts or findings. Literal U+FFFD is deliberately rejected too: after decoding,
+it cannot be distinguished from damaged input. Offsets always refer to valid
+original UTF-8, never to a repaired string. Policies that do not run either
+detector retain their existing behavior. No admission/body/rune limit changes.
+See [ADR 0013](docs/adr/0013-normalized-detector-integration.md).
+## Prometheus metrics
+
+`GET /metrics` on the API listener (prefixed by `API_PREFIX`, if configured)
+exports Prometheus text metrics using `client_golang`. No extra port or environment
+variable is required. When API keys are configured, scrapes require the same
+`Authorization: Bearer ...` or `X-API-Key` header as scans. Only health is exempt
+from authentication and admission. Scrapes consume admission capacity and retain
+body limits and HTTP timeouts, so they can return 401, 413 or 503 under the same
+conditions as other requests. Configure the scraper's credentials accordingly.
+
+| Metric | Meaning |
+| --- | --- |
+| `guardrail_executions_total` | Completed policy evaluations and actual detector invocations |
+| `guardrail_execution_duration_seconds` | Duration histogram for those same executions, in seconds (default Prometheus buckets) |
+
+Both use labels `policy`, `mode`, `stage`, `detector`, `action`, `decision` and
+`outcome`. `detector="none"` identifies a complete policy evaluation; its
+`action="none"` and `decision` is the applied `NONE`, `BLOCKED` or
+`GUARDRAIL_INTERVENED` (`none` on error). Detector series have `decision="none"`,
+configured action `mask`, `block` or `annotate`, and count once per text and chain
+step. `max_length` counts once per evaluation with action `block`; when it blocks,
+no chain detectors run. Outcomes are `clean`, `match` and `error`. A matching
+annotate/detect execution still reports a policy decision of `NONE`. These are
+execution counts, not numbers of findings or HTTP requests. Earlier successful
+steps remain counted if a later step fails. Cancellation and invalid spans are
+errors when returned by the executed detector. Policy latency includes limits,
+detectors and output processing; detector latency includes span validation.
+
+Each handler owns a fresh registry. Embedders can inject a caller-owned registry
+with `app.NewHandlerWithRegistry`; duplicate registrations return an error. No
+Prometheus global registry, process/Go collectors or scrape metrics are installed.
+Counters start when an execution completes, so unused series are absent. Health,
+scrapes, authentication/admission rejections, validation failures and unknown
+policies create no execution samples. This also prevents recursive scrape metrics.
+
+Policy and detector labels are bounded by the startup catalog and fixed scan
+policies; other labels are enums. Unexpected observer values collapse to
+`unknown`. No request text, matches, extracted rules/types, keys, request IDs,
+raw URLs or unknown user-selected policy names become labels. Cardinality grows
+only with operator-loaded policies and detector chains. See
+[ADR 0014](docs/adr/0014-prometheus-observation.md).

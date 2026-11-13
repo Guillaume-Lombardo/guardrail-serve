@@ -1,0 +1,79 @@
+[
+  {
+    "full_text": "Please write to maria.demo@example.org tomorrow.",
+    "masked": "x",
+    "spans": [
+      {
+        "end_position": 38,
+        "entity_type": "EMAIL_ADDRESS",
+        "entity_value": "maria.demo@example.org",
+        "start_position": 16
+      }
+    ],
+    "template_id": 1
+  },
+  {
+    "full_text": "Pay with card 4111 1111 1111 1111 and ask Jo Demo to confirm.",
+    "spans": [
+      {
+        "end_position": 33,
+        "entity_type": "CREDIT_CARD",
+        "entity_value": "4111 1111 1111 1111",
+        "start_position": 14
+      },
+      {
+        "end_position": 49,
+        "entity_type": "PERSON",
+        "entity_value": "Jo Demo",
+        "start_position": 42
+      }
+    ],
+    "template_id": 2
+  },
+  {
+    "full_text": "The weather is mild this week.",
+    "spans": [],
+    "template_id": 3
+  },
+  {
+    "full_text": "Ask Jo Demo about the schedule.",
+    "spans": [
+      {
+        "end_position": 11,
+        "entity_type": "PERSON",
+        "entity_value": "Jo Demo",
+        "start_position": 4
+      }
+    ],
+    "template_id": 4
+  },
+  {
+    "full_text": "Call (555) 010-0100 today.",
+    "spans": [
+      {
+        "end_position": 19,
+        "entity_type": "PHONE_NUMBER",
+        "entity_value": "(555) 010-0100",
+        "start_position": 5
+      }
+    ],
+    "template_id": 5
+  },
+  {
+    "full_text": "Please write to maria.demo@example.org tomorrow.",
+    "spans": [
+      {
+        "end_position": 38,
+        "entity_type": "EMAIL_ADDRESS",
+        "entity_value": "maria.demo@example.org",
+        "start_position": 16
+      }
+    ],
+    "template_id": 6
+  },
+  {
+    "full_text": "   ",
+    "spans": [],
+    "template_id": 7
+  }
+]
