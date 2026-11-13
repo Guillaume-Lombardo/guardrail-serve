@@ -1,0 +1,203 @@
+package secrets
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// contextValue is a synthetic low-entropy password: only its context makes it
+// a secret.
+const contextValue = "Zx9!kQ2#mR"
+
+func TestContextualSecretVariants(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	cases := []struct {
+		format string
+		rule   string
+	}{
+		{"password=%s", "keyword:password"},
+		{"password = %s", "keyword:password"},
+		{"password: %s", "keyword:password"},
+		{"password : %s", "keyword:password"},
+		{"mot de passe : %s", "keyword:password"},
+		{"password：%s", "keyword:password"},
+		{`"password": "%s"`, "keyword:password"},
+		{`{'password': '%s'}`, "keyword:password"},
+		{"PASSWORD=%s", "keyword:password"},
+		{"PassWord=%s", "keyword:password"},
+		{"Pwd=%s", "keyword:password"},
+		{"PASSWD=%s", "keyword:password"},
+		{"db_password=%s", "keyword:password"},
+		{"dbPassword=%s", "keyword:password"},
+		{"DB-PASSWORD2=%s", "keyword:password"},
+		{"db_pass=%s", "keyword:password"},
+		{"spring.datasource.password=%s", "keyword:password"},
+		{"--password=%s", "keyword:password"},
+		{"https://example.com/login?user=alice&password=%s&next=/", "keyword:password"},
+		{`password := "%s"`, "keyword:password"},
+		{`$password => '%s'`, "keyword:password"},
+		{`if (password == "%s") {`, "keyword:password"},
+		{"<password>%s</password>", "keyword:password"},
+		{"the password is %s", "keyword:password"},
+		{"the password is %s.", "keyword:password"},
+		{"le mot de passe est %s", "keyword:password"},
+		{"mdp=%s", "keyword:password"},
+		{"contraseña: %s", "keyword:password"},
+		{"client_secret=%s", "keyword:secret"},
+		{"SECRET_KEY = '%s'", "keyword:secret"},
+		{"clientSecret: %s", "keyword:secret"},
+		{"api-key: %s", "keyword:api_key"},
+		{"X-API-Key: %s", "keyword:api_key"},
+		{`apiKey: "%s"`, "keyword:api_key"},
+		{"private_key=%s", "keyword:api_key"},
+		{"AUTH_TOKEN=%s", "keyword:token"},
+		{"access_token: %s", "keyword:token"},
+		{"credentials: %s", "keyword:credential"},
+		{"Authorization: Basic %s", "keyword:authorization"},
+		{`"Authorization": "Token %s"`, "keyword:authorization"},
+	}
+	for _, tc := range cases {
+		text := strings.Replace(tc.format, "%s", contextValue, 1)
+		start := strings.Index(text, contextValue)
+		if findings := scan(t, scanner, text); !hasFinding(findings, tc.rule, start, start+len(contextValue)) {
+			t.Errorf("%q: want %s on the value, got %s", tc.format, tc.rule, describe(findings))
+		}
+	}
+}
+
+func TestBearerCredential(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	token := "kQ2mR7xZ9pL4vN8s.Tw3"
+	for _, format := range []string{
+		"Authorization: Bearer %s",
+		`curl -H "Authorization: Bearer %s" https://api.example.com`,
+		"use bearer %s for the call",
+	} {
+		text := strings.Replace(format, "%s", token, 1)
+		start := strings.Index(text, token)
+		findings := scan(t, scanner, text)
+		if len(findings) != 1 || findings[0].ByteStart != start || findings[0].ByteEnd != start+len(token) {
+			t.Errorf("%q: want one finding on the token, got %s", format, describe(findings))
+		}
+	}
+	if findings := scan(t, scanner, "bearer short1"); len(findings) != 0 {
+		t.Errorf("short bearer value reported: %s", describe(findings))
+	}
+}
+
+func TestDigitOnlyValues(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	if findings := scan(t, scanner, "pin password: 84736291"); len(findings) != 1 {
+		t.Errorf("numeric password must be reported, got %s", describe(findings))
+	}
+	for _, text := range []string{"token: 84736291", "api_key = 84736291", "secret: 84736291"} {
+		if findings := scan(t, scanner, text); len(findings) != 0 {
+			t.Errorf("%q: numeric non-password value reported: %s", text, describe(findings))
+		}
+	}
+}
+
+func TestKeyTokens(t *testing.T) {
+	cases := map[string][]string{
+		"DB_PASSWORD2":                 {"db", "password"},
+		"clientSecret":                 {"client", "secret"},
+		"APIKey":                       {"api", "key"},
+		"x-api-key":                    {"x", "api", "key"},
+		"spring.datasource.password":   {"spring", "datasource", "password"},
+		"mot de passe":                 {"mot", "de", "passe"},
+		"--password":                   {"password"},
+		"HTTPServerAuthorizationToken": {"http", "server", "authorization", "token"},
+	}
+	for key, want := range cases {
+		if got := keyTokens(key); !reflect.DeepEqual(got, want) {
+			t.Errorf("keyTokens(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
+func TestClassifyKey(t *testing.T) {
+	cases := []struct {
+		key    string
+		group  string
+		idLike bool
+	}{
+		{"password", groupPassword, false},
+		{"newpassword", groupPassword, false},
+		{"dbpass", groupPassword, false},
+		{"MOT_DE_PASSE", groupPassword, false},
+		{"secrets", groupSecret, false},
+		{"appsecret", groupSecret, false},
+		{"secretary", "", false},
+		{"apikey", groupAPIKey, false},
+		{"SECRET_KEY", groupSecret, false},
+		{"key", "", false},
+		{"monkey", "", false},
+		{"accessToken", groupToken, false},
+		{"tokens", "", false},
+		{"max_tokens", "", false},
+		{"csrf_token", "", false},
+		{"public_key", "", false},
+		{"password_length", "", false},
+		{"token_url", "", false},
+		{"secret_name", "", false},
+		{"api_key_id", "", true},
+		{"client_id", "", true},
+		{"userid", "", true},
+		{"request_id", "", true},
+		{"Authorization", groupAuthorization, false},
+		{"creds", groupCredential, false},
+		{"PassWord", groupPassword, false},
+		{"csrfToken", "", false},
+		{"nextPageToken", "", false},
+		{"apiKeyId", "", true},
+		{"passwordHint", "", false},
+	}
+	for _, tc := range cases {
+		group, idLike := classifyKey(tc.key)
+		if group != tc.group || idLike != tc.idLike {
+			t.Errorf("classifyKey(%q) = (%q, %v), want (%q, %v)", tc.key, group, idLike, tc.group, tc.idLike)
+		}
+	}
+}
+
+func TestKeywordValueFilters(t *testing.T) {
+	cases := []struct {
+		value  string
+		quoted bool
+		group  string
+		want   bool
+	}{
+		{"hunter2", false, groupPassword, true},
+		{"hunt", true, groupPassword, true},
+		{"hun", true, groupPassword, false},
+		{"hunt2", false, groupPassword, false},
+		{"Summer", false, groupPassword, false},
+		{"summer", true, groupPassword, true},
+		{"aBcdefg", false, groupPassword, true},
+		{"well-known", false, groupPassword, false},
+		{"REDACTED", true, groupPassword, false},
+		{"[hidden]", true, groupPassword, false},
+		{"xxxxxxxx", true, groupPassword, false},
+		{"${DB_PASS}", true, groupPassword, false},
+		{"{{ secret }}", true, groupPassword, false},
+		{"%(password)s", true, groupPassword, false},
+		{"$DB_PASS", true, groupPassword, false},
+		{"your_token_here", true, groupToken, false},
+		{"DB_PASSWORD", false, groupPassword, false},
+		{"DB_PASSWORD", true, groupPassword, true},
+		{"config.secret", false, groupSecret, false},
+		{"/etc/app/secret", false, groupSecret, false},
+		{"https://vault/x", false, groupSecret, false},
+		{"!!!!!!!", true, groupPassword, false},
+		{"Zx9!kQ2#mR", false, groupPassword, true},
+	}
+	for _, tc := range cases {
+		if got := acceptKeywordValue(tc.value, 0, len(tc.value), tc.quoted, tc.group); got != tc.want {
+			t.Errorf("acceptKeywordValue(%q, quoted=%v) = %v, want %v", tc.value, tc.quoted, got, tc.want)
+		}
+	}
+	if acceptKeywordValue("get_secret()", 0, len("get_secret"), false, groupSecret) {
+		t.Error("indirect reference get_secret() accepted")
+	}
+}
