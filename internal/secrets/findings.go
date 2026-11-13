@@ -49,21 +49,32 @@ func resolveOverlaps(findings []rawFinding) []rawFinding {
 		}
 		return a.rule < b.rule
 	})
+	// Sorted by start, every kept finding starts at or before the candidate:
+	// it contains the candidate exactly when it also ends at or after it, so
+	// the largest end kept per source rank answers the containment test.
+	// Exact duplicates are adjacent in this order.
+	var maxEnd [3]int
+	for i := range maxEnd {
+		maxEnd[i] = -1
+	}
 	kept := make([]rawFinding, 0, len(findings))
 	for _, candidate := range findings {
+		rank := sourceRank(candidate.source)
 		covered := false
-		for _, other := range kept {
-			if other.start <= candidate.start && candidate.end <= other.end {
-				sameSpan := other.start == candidate.start && other.end == candidate.end
-				if sourceRank(other.source) < sourceRank(candidate.source) ||
-					(other.source == candidate.source && sameSpan && (candidate.source != SourceGitleaks || other.rule == candidate.rule)) {
-					covered = true
-					break
-				}
+		for stronger := 0; stronger < rank; stronger++ {
+			if maxEnd[stronger] >= candidate.end {
+				covered = true
+				break
 			}
+		}
+		if n := len(kept); !covered && n > 0 {
+			last := kept[n-1]
+			covered = last.source == candidate.source && last.start == candidate.start && last.end == candidate.end &&
+				(candidate.source != SourceGitleaks || last.rule == candidate.rule)
 		}
 		if !covered {
 			kept = append(kept, candidate)
+			maxEnd[rank] = max(maxEnd[rank], candidate.end)
 		}
 	}
 	return kept

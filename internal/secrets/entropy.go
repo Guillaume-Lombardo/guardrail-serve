@@ -3,6 +3,7 @@ package secrets
 import (
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -54,7 +55,17 @@ var subresourceIntegrityPrefixes = []string{"sha1-", "sha256-", "sha384-", "sha5
 
 func scanEntropy(view *textView, assignments []assignment, cfg EntropyConfig) []rawFinding {
 	text := view.text
-	urls := urlPattern.FindAllStringIndex(text, -1)
+	urls := newSpanIndex(urlPattern.FindAllStringIndex(text, -1))
+	var strongSpans, idSpans [][]int
+	for _, a := range assignments {
+		if a.group != "" {
+			strongSpans = append(strongSpans, []int{a.valueStart, a.valueEnd})
+		}
+		if a.idLike {
+			idSpans = append(idSpans, []int{a.valueStart, a.valueEnd})
+		}
+	}
+	strongContext, idValues := newSpanIndex(strongSpans), newSpanIndex(idSpans)
 	var findings []rawFinding
 	for pos := 0; pos < len(text); {
 		if !isBase64Byte(text[pos]) {
@@ -66,13 +77,14 @@ func scanEntropy(view *textView, assignments []assignment, cfg EntropyConfig) []
 			pos++
 		}
 		for _, segment := range splitPadding(text, runStart, pos) {
-			strong := hasStrongContext(assignments, segment[0], segment[1])
+			// A key that names a secret, such as `api_key = <candidate>`.
+			strong := strongContext.overlaps(segment[0], segment[1])
 			parts := [][2]int{segment}
-			if !strong && insideAny(urls, segment[0], segment[1]) {
+			if !strong && urls.contains(segment[0], segment[1]) {
 				parts = splitByte(text, segment[0], segment[1], '/')
 			}
 			for _, part := range parts {
-				if finding, ok := evaluateCandidate(text, assignments, cfg, part[0], part[1], strong); ok {
+				if finding, ok := evaluateCandidate(text, idValues, cfg, part[0], part[1], strong); ok {
 					findings = append(findings, finding)
 				}
 			}
@@ -122,36 +134,38 @@ func splitByte(text string, start, end int, separator byte) [][2]int {
 	return parts
 }
 
-func insideAny(spans [][]int, start, end int) bool {
+// spanIndex is a sorted list of disjoint byte spans answering overlap and
+// containment queries in O(log n), so that context lookups stay linear in
+// the number of candidates.
+type spanIndex [][2]int
+
+// newSpanIndex sorts spans and merges the overlapping or adjacent ones.
+func newSpanIndex(spans [][]int) spanIndex {
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+	var index spanIndex
 	for _, span := range spans {
-		if span[0] <= start && end <= span[1] {
-			return true
+		if n := len(index); n > 0 && span[0] <= index[n-1][1] {
+			index[n-1][1] = max(index[n-1][1], span[1])
+			continue
 		}
+		index = append(index, [2]int{span[0], span[1]})
 	}
-	return false
+	return index
 }
 
-// hasStrongContext reports whether the candidate is (part of) the value of a
-// key that names a secret, such as `api_key = <candidate>`.
-func hasStrongContext(assignments []assignment, start, end int) bool {
-	for _, a := range overlapping(assignments, start, end) {
-		if a.group != "" {
-			return true
-		}
-	}
-	return false
+// overlaps reports whether [start, end) overlaps a span of the index.
+func (index spanIndex) overlaps(start, end int) bool {
+	i := sort.Search(len(index), func(i int) bool { return index[i][1] > start })
+	return i < len(index) && index[i][0] < end
 }
 
-func isIDValue(assignments []assignment, start, end int) bool {
-	for _, a := range overlapping(assignments, start, end) {
-		if a.idLike {
-			return true
-		}
-	}
-	return false
+// contains reports whether [start, end) lies inside one span of the index.
+func (index spanIndex) contains(start, end int) bool {
+	i := sort.Search(len(index), func(i int) bool { return index[i][0] > start }) - 1
+	return i >= 0 && end <= index[i][1]
 }
 
-func evaluateCandidate(text string, assignments []assignment, cfg EntropyConfig, start, end int, strong bool) (rawFinding, bool) {
+func evaluateCandidate(text string, idValues spanIndex, cfg EntropyConfig, start, end int, strong bool) (rawFinding, bool) {
 	candidate := text[start:end]
 	hex := isAllHex(candidate)
 	rule, threshold, minLength := ruleEntropyBase64, cfg.Base64Threshold, cfg.MinBase64Length
@@ -176,7 +190,7 @@ func evaluateCandidate(text string, assignments []assignment, cfg EntropyConfig,
 	// Filters for identifiers and digests. A key that names a secret wins:
 	// `api_key = <40 hex>` is reported even though it looks like a SHA-1.
 	if !strong {
-		if uuidPattern.MatchString(candidate) || isIDValue(assignments, start, end) ||
+		if uuidPattern.MatchString(candidate) || idValues.overlaps(start, end) ||
 			isDataURIPayload(text, start) || isSubresourceIntegrity(candidate) ||
 			(hex && isLikelyDigest(text, start, candidate)) {
 			return rawFinding{}, false

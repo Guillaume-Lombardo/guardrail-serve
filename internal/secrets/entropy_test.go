@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"math"
 	"strings"
 	"testing"
@@ -164,5 +165,51 @@ func TestSplitPadding(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("splitPadding = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestSpanIndex(t *testing.T) {
+	index := newSpanIndex([][]int{{10, 20}, {0, 5}, {18, 25}, {25, 30}, {40, 50}})
+	if want := (spanIndex{{0, 5}, {10, 30}, {40, 50}}); len(index) != len(want) || index[0] != want[0] || index[1] != want[1] || index[2] != want[2] {
+		t.Fatalf("newSpanIndex = %v, want %v", index, want)
+	}
+	overlaps := map[[2]int]bool{{0, 1}: true, {4, 6}: true, {5, 10}: false, {29, 31}: true, {30, 40}: false, {49, 60}: true, {50, 60}: false}
+	for span, want := range overlaps {
+		if got := index.overlaps(span[0], span[1]); got != want {
+			t.Errorf("overlaps(%v) = %v, want %v", span, got, want)
+		}
+	}
+	contains := map[[2]int]bool{{0, 5}: true, {1, 6}: false, {10, 30}: true, {12, 28}: true, {30, 41}: false, {40, 50}: true, {45, 51}: false}
+	for span, want := range contains {
+		if got := index.contains(span[0], span[1]); got != want {
+			t.Errorf("contains(%v) = %v, want %v", span, got, want)
+		}
+	}
+	if newSpanIndex(nil).overlaps(0, 1) || newSpanIndex(nil).contains(0, 1) {
+		t.Error("empty index matches")
+	}
+}
+
+// Adversarial shapes that used to be quadratic (assignment and overlap
+// lookups). Run with -bench to compare sizes; costs must grow linearly.
+func BenchmarkAdversarialInputs(b *testing.B) {
+	scanner, err := New(DefaultConfig())
+	if err != nil {
+		b.Fatal(err)
+	}
+	inputs := map[string]string{
+		"assignments": strings.Repeat("x=1\n", 16<<10),
+		"passwords":   strings.Repeat("password=hunter2\n", 4<<10),
+		"chain":       "x=" + strings.Repeat("a=", 32<<10),
+		"base64":      strings.Repeat("aZ3kQ9mX2pL7vN5sR8tW4yB6cD1fG0hJ", 2<<10),
+	}
+	for name, text := range inputs {
+		b.Run(name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				if _, err := scanner.Scan(context.Background(), text); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

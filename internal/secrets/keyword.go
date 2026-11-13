@@ -41,14 +41,15 @@ const hspace = `[\t\p{Zs}]`
 // assignmentPattern matches `key <op> value` on one line. Operators: `:=`,
 // `=>`, `=`, `==`, `===`, `!=`, `!==`, `:`, `>` (XML elements, as in the
 // gitleaks generic rule) and the full-width ':' and '=', or
-// the prose connectors "is", "est", "was". Values are a quoted string or an
-// unquoted run up to white space or a delimiter.
+// the prose connectors "is", "est", "was". Values are a quoted string, where
+// a backslash escapes the next character, or an unquoted run up to white
+// space or a delimiter.
 var assignmentPattern = regexp.MustCompile(
 	`(?P<key>(?i:mot[ _-]?de[ _-]?passe)|[\pL\pN_.\-]{1,64})` +
 		"[\"'`\\]]{0,2}" +
 		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*` +
 		`|` + hspace + `+(?i:is|est|was)` + hspace + `+)` +
-		"(?P<value>\"[^\"\\n]*\"|'[^'\\n]*'|`[^`\\n]*`|[^\\s\\p{Zs}\"'`,;&<>(){}\\[\\]]+)")
+		"(?P<value>\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)*'|`[^`\\n]*`|[^\\s\\p{Zs}\"'`,;&<>(){}\\[\\]]+)")
 
 // bearerPattern matches an RFC 6750 bearer credential outside an assignment.
 var bearerPattern = regexp.MustCompile(`(?i)\bbearer` + hspace + `+([A-Za-z0-9\-._~+/]+=*)`)
@@ -73,11 +74,20 @@ type assignment struct {
 }
 
 func findAssignments(view *textView) []assignment {
-	text := view.text
 	var found []assignment
-	for _, m := range assignmentPattern.FindAllStringSubmatchIndex(text, -1) {
-		key := text[m[2*assignKey]:m[2*assignKey+1]]
-		valueStart, valueEnd := m[2*assignValue], m[2*assignValue+1]
+	collectAssignments(view.text, 0, len(view.text), &found)
+	return found
+}
+
+// collectAssignments appends the assignments of text[from:to]. A match whose
+// key is not a secret key may hide one in its value ("Here is password=x",
+// `note: "password=x"`): quoted values are searched again (each quote kind
+// ends a nesting level, so the depth is bounded) and unquoted values are
+// tokenized by nestedAssignment, keeping the whole scan linear.
+func collectAssignments(text string, from, to int, found *[]assignment) {
+	for _, m := range assignmentPattern.FindAllStringSubmatchIndex(text[from:to], -1) {
+		key := text[from+m[2*assignKey] : from+m[2*assignKey+1]]
+		valueStart, valueEnd := from+m[2*assignValue], from+m[2*assignValue+1]
 		quoted := false
 		if c := text[valueStart]; c == '"' || c == '\'' || c == '`' {
 			quoted = true
@@ -87,22 +97,87 @@ func findAssignments(view *textView) []assignment {
 		group, idLike := classifyKey(key)
 		op := ""
 		if m[2*assignOp] >= 0 {
-			op = text[m[2*assignOp]:m[2*assignOp+1]]
+			op = text[from+m[2*assignOp] : from+m[2*assignOp+1]]
 		}
 		a := assignment{
 			valueStart: valueStart,
 			valueEnd:   valueEnd,
 			quoted:     quoted,
-			comparison: op == "==" || op == "===" || op == "!=" || op == "!==",
+			comparison: isComparison(op),
 			group:      group,
 			idLike:     idLike,
 		}
 		if group == groupAuthorization {
 			a = authorizationCredential(text, a)
 		}
-		found = append(found, a)
+		*found = append(*found, a)
+		switch {
+		case group != "" || valueEnd <= valueStart:
+		case quoted:
+			collectAssignments(text, valueStart, valueEnd, found)
+		default:
+			if nested, ok := nestedAssignment(text, valueStart, valueEnd); ok {
+				*found = append(*found, nested)
+			}
+		}
 	}
-	return found
+}
+
+func isComparison(op string) bool {
+	return op == "==" || op == "===" || op == "!=" || op == "!=="
+}
+
+func isOperatorRune(r rune) bool {
+	return r == ':' || r == '=' || r == '!' || r == '\uFF1A' || r == '\uFF1D'
+}
+
+func isKeyRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' || r == '.' || r == '-'
+}
+
+// maxKeyRunes bounds a key, as the {1,64} key repetition of
+// assignmentPattern does.
+const maxKeyRunes = 64
+
+// nestedAssignment finds the first secret key assignment inside the unquoted
+// value text[start:end] (which has no white space), such as `password=x` in
+// `note:password=x`. Keys are the key runes right before an operator run;
+// the value runs to end.
+func nestedAssignment(text string, start, end int) (assignment, bool) {
+	for pos := start; pos < end; {
+		r, size := utf8.DecodeRuneInString(text[pos:end])
+		if !isOperatorRune(r) {
+			pos += size
+			continue
+		}
+		opStart := pos
+		for pos < end {
+			r, size := utf8.DecodeRuneInString(text[pos:end])
+			if !isOperatorRune(r) {
+				break
+			}
+			pos += size
+		}
+		keyStart := opStart
+		for n := 0; n < maxKeyRunes && keyStart > start; n++ {
+			r, size := utf8.DecodeLastRuneInString(text[start:keyStart])
+			if !isKeyRune(r) {
+				break
+			}
+			keyStart -= size
+		}
+		if keyStart == opStart || pos == end {
+			continue
+		}
+		if group, idLike := classifyKey(text[keyStart:opStart]); group != "" {
+			a := assignment{valueStart: pos, valueEnd: end, comparison: isComparison(text[opStart:pos]), group: group, idLike: idLike}
+			if group == groupAuthorization {
+				a = authorizationCredential(text, a)
+			}
+			return a, true
+		}
+	}
+	return assignment{}, false
 }
 
 // authorizationSchemes are HTTP authentication schemes that precede the
@@ -485,15 +560,4 @@ func keyTokens(key string) []string {
 	}
 	flush(len(runes))
 	return tokens
-}
-
-// overlapping returns the assignments whose value overlaps [start, end).
-func overlapping(assignments []assignment, start, end int) []assignment {
-	var found []assignment
-	for _, a := range assignments {
-		if a.valueStart < end && start < a.valueEnd {
-			found = append(found, a)
-		}
-	}
-	return found
 }

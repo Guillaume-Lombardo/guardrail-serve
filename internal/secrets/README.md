@@ -116,8 +116,15 @@ a line:
 - operator: `:=`, `=>`, `=`, `==`, `===`, `!=`, `!==`, `:`, `>` (XML), the
   full-width `：` and `＝`, or the prose connectors `is`, `est`, `was`;
   horizontal white space includes tabs, no-break and narrow no-break spaces;
-- value: a quoted string (`"`, `'`, `` ` ``) or an unquoted run up to white
-  space or a delimiter.
+- value: a quoted string (`"`, `'`, `` ` ``; in `"` and `'` strings a
+  backslash escapes the next character, so `"abc\"def"` is one value) or an
+  unquoted run up to white space or a delimiter.
+
+When the key of a match is not a secret key, its value is searched again for
+a nested secret assignment: quoted values are rescanned (`note: "password=x"`,
+`{"msg": "the password is x"}`), and unquoted runs are split at operator
+characters (`Here is password=x`, `?password=x` in a URL, `a=b=password=x`).
+The whole keyword scan stays linear in the text length.
 
 The key is split into words (separators, then camelCase) and classified into a
 group: `password` (password, passwd, pwd, passphrase, `pass` after a

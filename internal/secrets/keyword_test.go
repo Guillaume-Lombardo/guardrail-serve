@@ -201,3 +201,41 @@ func TestKeywordValueFilters(t *testing.T) {
 		t.Error("indirect reference get_secret() accepted")
 	}
 }
+
+func TestNestedSecretAssignments(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	for _, format := range []string{
+		"Here is password=%s",
+		"note: password=%s",
+		"note:password=%s",
+		`note: "password=%s"`,
+		`{"msg": "the password is %s"}`,
+		"a=b=c=d=password=%s",
+		"see https://example.com/login?password=%s",
+	} {
+		text := strings.Replace(format, "%s", contextValue, 1)
+		start := strings.Index(text, contextValue)
+		if findings := scan(t, scanner, text); !hasFinding(findings, "keyword:password", start, start+len(contextValue)) {
+			t.Errorf("%q: want keyword:password on the value, got %s", format, describe(findings))
+		}
+	}
+	for _, text := range []string{"a=b=c=d", "ratio=a:b:c", "x=" + strings.Repeat("a=", 2000)} {
+		if findings := scan(t, scanner, text); len(findings) != 0 {
+			t.Errorf("%.40q: unexpected %s", text, describe(findings))
+		}
+	}
+}
+
+func TestQuotedValuesHonourEscapes(t *testing.T) {
+	scanner := mustScanner(t, keywordsOnly())
+	for _, tc := range []struct{ text, value string }{
+		{`{"password":"abc\"def123"}`, `abc\"def123`},
+		{`{'password': 'it\'s9more'}`, `it\'s9more`},
+		{`{"password":"abc\\"}`, `abc\\`},
+	} {
+		start := strings.Index(tc.text, tc.value)
+		if findings := scan(t, scanner, tc.text); len(findings) != 1 || !hasFinding(findings, "keyword:password", start, start+len(tc.value)) {
+			t.Errorf("%q: want one finding on the whole value, got %s", tc.text, describe(findings))
+		}
+	}
+}
