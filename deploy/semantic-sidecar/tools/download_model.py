@@ -4,17 +4,18 @@ Usage: download_model.py MODEL_ID REVISION DEST [EXPECTED_SAFETENSORS_SHA256]
 
 The optional Hugging Face token is read from the file named by HF_TOKEN_FILE
 (a BuildKit secret mount) and is never printed, logged or stored in the image.
-Only safetensors weights and tokenizer/config files are downloaded: no pickle
-formats, no ONNX, no code files.
+Only safetensors weights, tokenizer/config files and the license texts (LICENSE,
+USE_POLICY) are downloaded: no pickle formats, no ONNX, no code files.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import sys
 
-ALLOW = ["*.json", "*.safetensors", "*.model", "LICENSE*", "NOTICE*", "README.md"]
+ALLOW = ["*.json", "*.safetensors", "*.model", "LICENSE*", "USE_POLICY*", "NOTICE*", "README.md"]
 IGNORE = ["onnx/*", "*/*", "*.onnx", "*.bin", "*.pt", "*.pth", "*.ckpt", "*.pkl", "*.py"]
 HEX40 = set("0123456789abcdef")
 
@@ -45,6 +46,9 @@ def main(argv: list[str]) -> int:
     except Exception as exc:  # noqa: BLE001 - class name only: messages can include request details
         print(f"download failed: {type(exc).__name__} (gated model without a token, or unknown revision?)", file=sys.stderr)
         return 1
+
+    # huggingface_hub keeps download bookkeeping (etags, lock files) here: not needed at runtime.
+    shutil.rmtree(os.path.join(dest, ".cache"), ignore_errors=True)
 
     weights = os.path.join(dest, "model.safetensors")
     if not os.path.isfile(weights):

@@ -1,0 +1,8 @@
+Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platforms, Inc. All Rights Reserved.
+
+Built with Llama.
+
+This image contains Llama Prompt Guard 2 model weights (Llama Materials). The license text
+is distributed with them in /models/model/LICENSE and the Acceptable Use Policy in
+/models/model/USE_POLICY.md. Use of the Llama Materials must comply with that license and
+with the Llama 4 Acceptable Use Policy (https://www.llama.com/llama4/use-policy).

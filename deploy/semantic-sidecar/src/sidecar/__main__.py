@@ -48,7 +48,7 @@ def serve(
         return TransformersBackend(
             model_id=config.model_id, revision=config.model_revision, model_path=config.model_path,
             labels=config.malicious_labels, batch_size=config.batch_size, max_tokens=config.max_tokens,
-            threads=config.torch_threads,
+            threads=config.torch_threads, verify_labels=config.verify_labels,
         )
 
     port = server.server_address[1]
