@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 
 class DeadlineExceeded(Exception):
@@ -27,6 +27,26 @@ class Backend(Protocol):
         real tokenizer, special tokens included) and DeadlineExceeded when
         time.monotonic() passes deadline between micro-batches.
         """
+
+
+def run_in_microbatches(items: Sequence[int], batch_size: int, deadline: float,
+                        process: Callable[[Sequence[int]], None],
+                        clock: Callable[[], float] = time.monotonic) -> None:
+    """Run process() over consecutive micro-batches with a cooperative deadline.
+
+    The deadline is only observed between micro-batches, never inside one: a
+    forward pass in flight cannot be interrupted. A micro-batch that starts
+    before the deadline therefore runs to completion, so the overrun is bounded
+    by the duration of one micro-batch (batch_size texts), not by zero. The
+    deadline is also checked after the last micro-batch, so a late answer is
+    never returned as a success.
+    """
+    for start in range(0, len(items), batch_size):
+        if clock() >= deadline:
+            raise DeadlineExceeded
+        process(items[start:start + batch_size])
+        if clock() >= deadline:
+            raise DeadlineExceeded
 
 
 def resolve_label_indices(id2label: dict[int, str], wanted: Sequence[str]) -> list[int]:
@@ -113,22 +133,20 @@ class TransformersBackend:
         # Shortest first keeps padding small; results are restored to input order.
         order = sorted(range(len(encoded)), key=lambda i: len(encoded[i]))
         scores = [0.0] * len(encoded)
+
+        def process(members: Sequence[int]) -> None:
+            width = max(len(encoded[i]) for i in members)
+            input_ids = torch.full((len(members), width), self._pad_id, dtype=torch.long)
+            mask = torch.zeros((len(members), width), dtype=torch.long)
+            for row, i in enumerate(members):
+                length = len(encoded[i])
+                input_ids[row, :length] = torch.tensor(encoded[i], dtype=torch.long)
+                mask[row, :length] = 1
+            logits = self._model(input_ids=input_ids, attention_mask=mask).logits
+            probabilities = torch.softmax(logits.float(), dim=-1)[:, self._malicious].sum(dim=-1)
+            for row, i in enumerate(members):
+                scores[i] = float(probabilities[row])
+
         with torch.inference_mode():
-            for start in range(0, len(order), self._batch_size):
-                if time.monotonic() >= deadline:
-                    raise DeadlineExceeded
-                members = order[start:start + self._batch_size]
-                width = max(len(encoded[i]) for i in members)
-                input_ids = torch.full((len(members), width), self._pad_id, dtype=torch.long)
-                mask = torch.zeros((len(members), width), dtype=torch.long)
-                for row, i in enumerate(members):
-                    length = len(encoded[i])
-                    input_ids[row, :length] = torch.tensor(encoded[i], dtype=torch.long)
-                    mask[row, :length] = 1
-                logits = self._model(input_ids=input_ids, attention_mask=mask).logits
-                probabilities = torch.softmax(logits.float(), dim=-1)[:, self._malicious].sum(dim=-1)
-                for row, i in enumerate(members):
-                    scores[i] = float(probabilities[row])
-                if time.monotonic() >= deadline:
-                    raise DeadlineExceeded
+            run_in_microbatches(order, self._batch_size, deadline, process)
         return scores

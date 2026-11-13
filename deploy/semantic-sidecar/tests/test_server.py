@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "src"))
 sys.path.insert(0, HERE)
 
 from fake_backend import TRIGGER, FakeBackend  # noqa: E402
-from sidecar.backend import resolve_label_indices, validate_scores  # noqa: E402
+from sidecar.backend import DeadlineExceeded, resolve_label_indices, run_in_microbatches, validate_scores  # noqa: E402
 from sidecar.config import DEFAULT_MODEL_REVISION, Config, ConfigError  # noqa: E402
 from sidecar.server import Application, BoundedServer  # noqa: E402
 
@@ -255,6 +255,51 @@ class ServerTest(unittest.TestCase):
             else:
                 self.assertIn(body["error"], ("overloaded", "busy"))
         self.assertTrue(any(status == 200 for _, (status, _, _) in out))
+
+
+class MicrobatchDeadlineTest(unittest.TestCase):
+    """The deadline is cooperative: observed between micro-batches, not inside one."""
+
+    def run_plan(self, count, batch, cost, deadline):
+        now = [0.0]
+        started = []
+
+        def process(members):
+            started.append(list(members))
+            now[0] += cost
+
+        try:
+            run_in_microbatches(list(range(count)), batch, deadline, process, clock=lambda: now[0])
+            outcome = "ok"
+        except DeadlineExceeded:
+            outcome = "deadline"
+        return outcome, started, now[0]
+
+    def test_completes_within_the_deadline(self):
+        outcome, started, _ = self.run_plan(6, 2, 1.0, 10.0)
+        self.assertEqual((outcome, started), ("ok", [[0, 1], [2, 3], [4, 5]]))
+
+    def test_overrun_is_bounded_by_one_micro_batch(self):
+        # 4 s per micro-batch, deadline 10 s: batches start at t=0, 4 and 8, the
+        # last one finishes at 12 (2 s late), and no fourth batch starts.
+        outcome, started, end = self.run_plan(8, 2, 4.0, 10.0)
+        self.assertEqual((outcome, len(started), end), ("deadline", 3, 12.0))
+
+    def test_smaller_micro_batches_shrink_the_overrun(self):
+        # Same per-text cost (2 s), same deadline: the overrun is at most one micro-batch.
+        for batch in (8, 4, 2, 1):
+            with self.subTest(batch=batch):
+                outcome, _, end = self.run_plan(32, batch, 2.0 * batch, 10.0)
+                self.assertEqual(outcome, "deadline")
+                self.assertLess(end - 10.0, 2.0 * batch)
+
+    def test_last_micro_batch_cannot_return_a_late_success(self):
+        outcome, started, _ = self.run_plan(2, 8, 11.0, 10.0)
+        self.assertEqual((outcome, len(started)), ("deadline", 1))
+
+    def test_expired_deadline_starts_nothing(self):
+        outcome, started, _ = self.run_plan(4, 2, 1.0, 0.0)
+        self.assertEqual((outcome, started), ("deadline", []))
 
 
 class ConfigTest(unittest.TestCase):

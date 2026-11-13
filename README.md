@@ -517,9 +517,13 @@ classification).
 docker compose -f deploy/semantic-sidecar/compose.yaml up --build   # build host only
 ```
 
-**Status: `integration_pending`.** The server and its contract with the Go
-client are tested against a fake backend; the image build, the real model's
-labels and its recall, false-positive rate and latency are not measured yet.
+**Status.** Validated with the real model on the build host (`codex-dev`, head
+`857e02c`): image build, model load, labels (`SAFE`/`INJECTION`), the `scores`
+contract, token limits, container hardening, and the Go service against the sidecar
+(fail-closed 502, fail-open `semantic classifier degraded` warning). **Still
+`integration_pending`:** the Compose stack (`compose up`, isolated network,
+restart, SIGTERM) and any corpus quality measure, notably **French** (the default
+model is English only; no recall or false-positive rate has been measured).
 The real-model check is a Go test behind the `realsidecar` build tag (excluded
 from `go test ./...` and from GitHub CI):
 
@@ -528,15 +532,22 @@ SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 \
   go test -tags realsidecar ./tests/integration/semantic_sidecar -run TestRealModel -count=1 -v
 ```
 
-Operational guidance for the settings above: `SEMANTIC_TIMEOUT` must cover a
-CPU forward pass for every chunk batch of a long text (the `2s` default is
-unvalidated for a base-size model, so measure p95 with
-`deploy/semantic-sidecar/tools/measure.py`); `SEMANTIC_FAILURE_MODE=closed`
-returns 502 when the sidecar fails or rejects an over-long text, `open` passes
-the text and logs `semantic classifier degraded`; `SEMANTIC_THRESHOLD` is
-per-model and must be calibrated on your data, the sidecar returns
-probabilities only. The 510-rune chunking stays a heuristic: the sidecar counts
-real tokens and answers 422 rather than truncating.
+**Size `SEMANTIC_TIMEOUT` for your text limit.** On the test host (2 shared vCPUs,
+inference serialized) a 510-character chunk costs about 125 ms. The `2s` Go default
+fails at 12 000 characters; the previous `5s` Compose default fails at 19 000.
+`MAX_TEXT_CHARS=20000` needs **at least 8-10 s at low load** (the Compose stack now
+defaults to `10s`) or a lower `MAX_TEXT_CHARS`; recalibrate under concurrency
+(`HTTP_MAX_CONCURRENT_REQUESTS`) and keep `HTTP_WRITE_TIMEOUT` and any upstream
+guardrail timeout above the worst whole request. `SEMANTIC_FAILURE_MODE=closed`
+returns 502 when the sidecar fails, times out or rejects an over-long text; `open`
+passes the text and logs `semantic classifier degraded`. `SEMANTIC_THRESHOLD` is
+per-model and must be calibrated on your data (the sidecar returns probabilities
+only). The 510-rune chunking stays a heuristic: the sidecar counts real tokens and
+answers 422 rather than truncating. The sidecar deadline is cooperative (observed
+between micro-batches, so one micro-batch can overrun it) and a request the client
+abandoned can keep a serialized sidecar busy. Measurements, formulas and caveats:
+[sidecar README](deploy/semantic-sidecar/README.md#measured-results-and-limits).
+The Compose stack attaches the sidecar only to an `internal: true` network.
 
 ### Native secret detection
 

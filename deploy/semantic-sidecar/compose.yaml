@@ -1,6 +1,8 @@
 # guardrail-serve + CPU semantic sidecar. Run the build on the designated build
-# host only (see README.md). The sidecar publishes no port: only the guardrail
-# service reaches it over the compose network.
+# host only (see README.md). The sidecar publishes no port and is attached only to
+# the `sidecar` network, which is `internal: true`: it has no route to the outside
+# (the model is baked in and the runtime is offline). Only the guardrail service,
+# which also joins the default network to publish its port, can reach it.
 #
 #   docker compose -f deploy/semantic-sidecar/compose.yaml up --build
 #
@@ -19,9 +21,11 @@ services:
       SEMANTIC_ENABLED: "true"
       SEMANTIC_URL: http://semantic-sidecar:8080/classify
       SEMANTIC_FORMAT: scores
-      # Budget for one text: every 510-rune chunk batch of a long text is scored
-      # on CPU. Measure p95 on your hardware (README.md) before lowering it.
-      SEMANTIC_TIMEOUT: ${SEMANTIC_TIMEOUT:-5s}
+      # Budget for ONE text, all chunk batches included. Measured on 2 shared vCPUs
+      # (about 0.125 s per 510-rune chunk, English): 2s fails around 12000 chars, 5s
+      # around 19000. 10s covers MAX_TEXT_CHARS=20000 at low load; concurrent requests
+      # queue behind a serialized sidecar, so recalibrate on your hardware (README.md).
+      SEMANTIC_TIMEOUT: ${SEMANTIC_TIMEOUT:-10s}
       SEMANTIC_THRESHOLD: ${SEMANTIC_THRESHOLD:-0.9}
       SEMANTIC_FAILURE_MODE: ${SEMANTIC_FAILURE_MODE:-closed}
       GUARDRAILS_CONFIG_DIR: /policies
@@ -35,6 +39,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    networks: [default, sidecar]
 
   semantic-sidecar:
     build:
@@ -51,6 +56,7 @@ services:
       SIDECAR_MAX_BODY_BYTES: ${SIDECAR_MAX_BODY_BYTES:-1048576}
       SIDECAR_MAX_INFLIGHT: ${SIDECAR_MAX_INFLIGHT:-4}
       SIDECAR_INFERENCE_TIMEOUT_SECONDS: ${SIDECAR_INFERENCE_TIMEOUT_SECONDS:-10}
+      SIDECAR_BATCH_SIZE: ${SIDECAR_BATCH_SIZE:-8}
       SIDECAR_TORCH_THREADS: ${SIDECAR_TORCH_THREADS:-2}
     expose:
       - "8080"
@@ -63,3 +69,8 @@ services:
     mem_limit: 2g
     cpus: 2
     restart: unless-stopped
+    networks: [sidecar]
+
+networks:
+  sidecar:
+    internal: true

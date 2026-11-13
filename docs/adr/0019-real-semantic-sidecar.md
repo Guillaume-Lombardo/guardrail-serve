@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Real-model measurements are pending (see "Validation status").
+Accepted. Validated with the real model on the build host; Compose and corpus quality remain pending (see "Validation status").
 
 ## Context
 
@@ -86,8 +86,14 @@ reproducible checks, without touching the Go service's domain code.
   hash-pinned (`pip --require-hashes`, CPU-only torch wheel).
 - Bounded: body size, texts per request, tokens per text, requests in flight
   (excess gets 503 `overloaded`), open connections, socket timeouts and a
-  per-request inference deadline (504, checked after every micro-batch and again before responding).
+  per-request inference deadline (504). The deadline is cooperative: a forward pass
+  cannot be interrupted, so it is observed between micro-batches and once before
+  responding, and the overrun is bounded by one micro-batch (measured: 16.3 s for a
+  10 s deadline with 32 texts of 512 tokens). It is not a hard guarantee.
   Inference is serialized; a request waiting past its deadline gets 503 `busy`.
+  The client's timeout is not propagated: an inference already running continues
+  after the client gave up, and queued requests are served unless their own
+  deadline passes first. A process-killing or cancellation mechanism was not added.
 - Token limit: the Go client's 510-rune chunk is a heuristic (ADR 0010). The
   sidecar tokenizes with the real tokenizer and rejects, never truncates, a text
   above `SIDECAR_MAX_TOKENS` (422 `text_too_long`), which the client reports as
@@ -105,7 +111,12 @@ reproducible checks, without touching the Go service's domain code.
   `GET /readyz` (200 only after the model is loaded and warmed up), graceful
   SIGTERM, fail-fast exit on model load failure.
 - No sidecar authentication, consistent with ADR 0010: the sidecar publishes no
-  port in the compose file and must stay on a private network.
+  port in the compose file and must stay on a private network. The compose file
+  attaches it only to a network declared `internal: true` (no route outside the
+  stack; the runtime is offline and needs none), while the guardrail service joins
+  both that network and the default one. A plain `docker run` on the default bridge
+  was observed to allow outbound connections, which motivated this isolation. Host
+  firewall and service configuration are not touched.
 
 ### Verification layout
 
@@ -122,21 +133,47 @@ reproducible checks, without touching the Go service's domain code.
 
 ## Validation status
 
-- Done here: server logic, wire contract with the Go client, failure modes,
-  configuration, dependency resolution (metadata only), documentation.
-- **Not done (`integration_pending`)**: no image was built and no model was
-  loaded on the allowed host. Image build, model load, label mapping against
-  the real checkpoint, `SEMANTIC_TIMEOUT` sizing and recall/FPR/latency are
-  unmeasured. Treat the shipped default timeout and threshold as unvalidated.
+Real-model validation ran on the build host (`codex-dev`) at head `857e02c`
+(report kept by the orchestrator); the sidecar code changed afterwards only as
+described under "Changes after validation".
+
+- **Validated**: image build (model downloaded at the pinned commit, safetensors
+  sha256 matches), model load and readiness (3.6-4.3 s), labels `SAFE`/`INJECTION`
+  and score = probability of `INJECTION`, the `scores` contract and its negative
+  cases, the 512-token limit (511 tokens rejected with 422, no truncation), container
+  hardening (uid 65532, read-only root, dropped capabilities, offline, memory and CPU
+  limits), the Go test `TestRealModel`, and the Go service against the sidecar
+  (attack blocked; fail-closed 502 and fail-open warning). Latency is about 125 ms per
+  510-character chunk on 2 shared vCPUs, linear, inference serialized (figures in the
+  sidecar README). English only.
+- **`integration_pending`**: the Compose stack (`up`, internal network, `depends_on`,
+  restart, graceful SIGTERM) and any corpus quality measure (recall, false-positive
+  rate), notably French. The default threshold `0.9` is unvalidated for any corpus.
+- Timeout findings: with the Go default `SEMANTIC_TIMEOUT=2s` a 12 000-character text
+  fails (502 in fail-closed mode); the earlier Compose default of `5s` fails at
+  19 000 characters. `MAX_TEXT_CHARS=20000` needs at least 8-10 s at low load, more
+  under concurrency; the Compose default is now `10s`. The Go default is left
+  unchanged (ADR 0010/0016 behavior).
+- A request abandoned by the client appeared to keep the sidecar busy (a benign call
+  took 3.19 s instead of 0.16 s after three timeouts). That is an inference from
+  timings, not confirmed from logs.
+
+### Changes after validation
+
+The micro-batch loop moved into a backend-independent function so the cooperative
+deadline is unit-tested with a simulated clock, and the compose file gained the
+internal network and the 10 s default. These need re-validation of the Compose
+stack on the build host.
 
 ## Consequences
 
 - Positive: a real, auditable path from the Go service to a model; failure
   behavior covered by black-box tests; model choice is configuration; no change
   to domain code or the Go client.
-- Negative: a Python runtime and a large CPU image (PyTorch plus baked weights) to operate; CPU
-  latency for a base-size model is likely above the 2 s default client timeout
-  for long inputs (to be measured); the English-only default model cannot be
+- Negative: a Python runtime and a large CPU image (3.03 GB measured, PyTorch plus
+  baked weights) to operate; CPU latency for a base-size model exceeds the 2 s default
+  client timeout above roughly 12 000 characters (measured), and serialized inference
+  makes latency grow with concurrency; the English-only default model cannot be
   expected to detect French attacks, so it complements the deterministic
   detector rather than replacing it.
 - Risks: the upstream default model is archived (no fixes); fail-open lets an
