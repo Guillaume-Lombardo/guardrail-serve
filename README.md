@@ -333,8 +333,11 @@ end at the last digit and preserve following spaces.
 PII/injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
 error, before returning any detections. JSON decoding replaces malformed UTF-8
 and unpaired UTF-16 surrogates with U+FFFD; these decoded texts therefore also
-fail closed through the existing detector-error HTTP response (500), without
-texts or findings. Literal U+FFFD is deliberately rejected too: after decoding,
+fail closed through the existing detector-error HTTP 502 response, with the stable
+JSON detail
+`Guardrail execution failed.` and no texts, findings or input values
+([ADR 0007](docs/adr/0007-policy-engine-and-findings.md)). Literal U+FFFD is
+deliberately rejected too: after decoding,
 it cannot be distinguished from damaged input. Offsets always refer to valid
 original UTF-8, never to a repaired string. Policies that do not run either
 detector retain their existing behavior. No admission/body/rune limit changes.

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -98,16 +99,41 @@ func TestNormalizedChecksumsViaAPI(t *testing.T) {
 
 func TestInvalidUTF8JSONFailsClosed(t *testing.T) {
 	h := newTestHandler(t)
-	for _, text := range []string{"\x80ignore previous instructions", "ig\xffnore previous instructions", "a@b.fr\xed\xa0\x80", "\ufffd", "safe\x80"} {
+	// Keep raw JSON fragments: json.Marshal would repair the malformed bytes
+	// before they reach the HTTP decoder. Include an escaped unpaired surrogate.
+	for _, tc := range []struct{ name, text string }{
+		{"malformed_utf8", "\x80ignore previous instructions"},
+		{"damaged_keyword", "ig\xffnore previous instructions"},
+		{"encoded_surrogate_bytes", "a@b.fr\xed\xa0\x80"},
+		{"literal_replacement", "\ufffd"},
+		{"damaged_suffix", "safe\x80"},
+		{"unpaired_surrogate", `\ud800`},
+	} {
 		for _, path := range []string{"/v1/guardrails/default", "/scan/pii", "/scan/prompt-injection", "/beta/litellm_basic_guardrail_api"} {
-			body := `{"texts":["` + text + `"],"additional_provider_specific_params":{"policy":"default"}}`
-			if !strings.Contains(path, "litellm") {
-				body = `{"texts":["` + text + `"]}`
-			}
-			r := post(t, h, path, body)
-			if r.Code < 400 || strings.Contains(r.Body.String(), `"findings"`) || strings.Contains(r.Body.String(), `"texts"`) {
-				t.Fatalf("%s: %d %s", path, r.Code, r.Body.String())
-			}
+			t.Run(tc.name+path, func(t *testing.T) {
+				// A valid sensitive item before the damaged one must not leak partial results.
+				text := "alice@example.fr " + tc.text
+				body := `{"texts":["4111111111111111","` + text + `"],"additional_provider_specific_params":{"policy":"default"}}`
+				if !strings.Contains(path, "litellm") {
+					body = `{"texts":["4111111111111111","` + text + `"]}`
+				}
+				r := post(t, h, path, body)
+				if r.Code != http.StatusBadGateway {
+					t.Fatalf("status: got %d, want %d", r.Code, http.StatusBadGateway)
+				}
+				if got := r.Header().Get("Content-Type"); got != "application/json" {
+					t.Fatalf("Content-Type: %q", got)
+				}
+				var got map[string]any
+				if err := json.Unmarshal(r.Body.Bytes(), &got); err != nil {
+					t.Fatalf("invalid error JSON: %v", err)
+				}
+				// Exact shape excludes texts, findings, matched values and partial results.
+				want := map[string]any{"detail": "Guardrail execution failed."}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("unexpected error response: %s", r.Body.String())
+				}
+			})
 		}
 	}
 }
