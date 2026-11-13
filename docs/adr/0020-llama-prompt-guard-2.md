@@ -91,7 +91,7 @@ summary, not legal advice; the text prevails.
 | Display "Built with Llama" on a related website, user interface, blog post, about page or product documentation | The sidecar README, the root README and this ADR; image label `io.guardrail-serve.model.attribution`. An operator who builds a product on the image owns the display in their own interface or docs. |
 | Comply with the Acceptable Use Policy and applicable law | Operator responsibility; stated in the README. |
 | Prefix the name of an AI model trained or improved with Llama materials with "Llama" | Not applicable: no training or fine-tuning here. |
-| Separate license from Meta above 700 million monthly active users | Operator responsibility. |
+| A separate license from Meta in the 700-million-monthly-active-users case (conditions on the licensee and its affiliates, as the agreement defines them) | Operator responsibility; the agreement's commercial terms prevail and are not restated here. |
 
 The MIT license of this repository does **not** cover the weights. The repository
 holds no weights, no Meta code and no image. Whoever builds an image from

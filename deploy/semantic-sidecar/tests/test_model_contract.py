@@ -60,6 +60,16 @@ class LabelCheckTest(unittest.TestCase):
             with self.subTest(attack=attack), self.assertRaises(ValueError):
                 verify_label_mapping(self.scorer(attack, benign))
 
+    def test_non_finite_or_out_of_range_scores_are_refused(self):
+        nan, inf = float("nan"), float("inf")
+        for attack, benign in ((nan, nan), (nan, 0.0), (1.0, nan), (inf, 0.0), (1.5, 0.0), (0.9, -0.5)):
+            with self.subTest(attack=attack, benign=benign), self.assertRaises(ValueError):
+                verify_label_mapping(self.scorer(attack, benign))
+
+    def test_wrong_score_count_is_refused(self):
+        with self.assertRaises(ValueError):
+            verify_label_mapping(lambda texts: [0.9])
+
     def test_error_names_no_input(self):
         with self.assertRaises(ValueError) as caught:
             verify_label_mapping(self.scorer(0.1, 0.9))

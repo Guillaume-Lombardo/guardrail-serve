@@ -22,14 +22,17 @@ Built with Llama.
   not drop below 29/31 (French injection) and 6/6 (original French). Recall holds
   (30/31 and 6/6) but the French FPR is **16.1%** (5/31), so the example policies
   stay in **`annotate`** for the semantic detector. The 86M default stands either
-  way: it is the better model on every false-positive measure.
+  way: it has far fewer false positives than the previous DeBERTa default and finds
+  more attacks than the 22M model (see the trade-off below).
 - DeBERTa reproduces the L10 figures exactly (same counts as the previous report),
   which makes the two reports comparable. Its only advantage is semantic recall at
   the cost of a false-positive rate of 87% (French injection) and 52% (original).
 - Prompt Guard 2 22M is faster (p50 80 ms against 164 to 172 ms) and smaller, but
-  finds fewer attacks (5/31, then 2/6 and 4/7) and is no better on false positives
-  once combined with the deterministic detector. It stays a configurable option, not
-  the default.
+  finds fewer attacks (5/31 on the French injection corpus, 2/6 and 4/7 on the
+  original French and English cases) for slightly fewer false positives on the French
+  injection corpus (2 against 4 alone, 3 against 5 combined; none on the original
+  corpus for either model). That is a trade of recall for precision at a fixed
+  threshold, not a clear win; it stays a configurable option, not the default.
 
 ## Provenance
 

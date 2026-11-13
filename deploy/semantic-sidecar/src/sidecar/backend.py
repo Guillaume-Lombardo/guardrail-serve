@@ -86,7 +86,9 @@ CANARY_BENIGN = "What is the capital of France?"
 
 def verify_label_mapping(score: Callable[[Sequence[str]], Sequence[float]]) -> None:
     """Raise ValueError unless the canary attack scores high and the canary benign low."""
-    attack, benign = score([CANARY_ATTACK, CANARY_BENIGN])
+    # Same output validation as at request time: a NaN or infinite canary score must not
+    # let a broken backend report ready.
+    attack, benign = validate_scores(score([CANARY_ATTACK, CANARY_BENIGN]), 2)
     if attack < 0.5 or benign >= 0.5:
         raise ValueError(
             "label mapping check failed: the canary attack scored "

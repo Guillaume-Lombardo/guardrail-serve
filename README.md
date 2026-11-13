@@ -551,8 +551,9 @@ lists only CamemBERT and XLM-RoBERTa for sequence classification) and
 [ADR 0020](docs/adr/0020-llama-prompt-guard-2.md) (model choice, labels, licence).
 
 ```sh
-# build host only; HF_TOKEN comes from your secret store, never from a file in the repo
-HF_TOKEN=<token> docker compose -f deploy/semantic-sidecar/compose.yaml up --build
+# build host only; HF_TOKEN comes from your secret store through command substitution,
+# never typed on a command line and never from a file in the repo
+HF_TOKEN="$(<secret-store read command>)" docker compose -f deploy/semantic-sidecar/compose.yaml up --build
 # no token: the public fallback
 docker compose -f deploy/semantic-sidecar/compose.yaml \
   --env-file deploy/semantic-sidecar/profiles/deberta-fallback.env up --build

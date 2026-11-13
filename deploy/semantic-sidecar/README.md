@@ -88,10 +88,11 @@ Docker builds belong on the designated build host (not on docker-box).
 
 ```sh
 # Default model (Prompt Guard 2 86M, gated): the token is a BuildKit secret, never an
-# argument or environment of the image. Export it in your build shell only and do not
-# write it to a file in the repository. The account needs access to the gated repository.
-export HF_TOKEN=...
-docker compose -f deploy/semantic-sidecar/compose.yaml up --build
+# argument or environment of the image. Read it from your secret store in the build
+# shell only (never type the value: it would persist in shell history) and do not write
+# it to a file in the repository. The account needs access to the gated repository.
+HF_TOKEN="$(<secret-store read command>)" \
+  docker compose -f deploy/semantic-sidecar/compose.yaml up --build
 
 # 22M option or public fallback: pinned profiles (the fallback needs no token)
 docker compose -f deploy/semantic-sidecar/compose.yaml \
@@ -179,8 +180,9 @@ beyond the grace period (an unbounded join could outlive the container stop time
 end in SIGKILL anyway). The bound is sized from the cooperative inference deadline:
 a request already running at SIGTERM ends at its cooperative deadline
 (`SIDECAR_INFERENCE_TIMEOUT_SECONDS`) plus the micro-batch that was in flight. The worst
-case observed was 16.5 s in total (an overrun of about 6.5 s past the 10 s deadline, for
-32 texts of 512 tokens at batch 8), so the `20` default covers what was observed. It is
+case observed was 16.5 s in total with DeBERTa in L10 (an overrun of about 6.5 s past the
+10 s deadline, for 32 texts of 512 tokens at batch 8) and 17.8 s with the 86M model in L11 on
+a loaded VM, so the `20` default covers what was observed but with little margin. It is
 not a universal guarantee: slower CPUs or larger batches overrun more. **Keep the container stop
 timeout above the grace period**: the Compose file sets `stop_grace_period: 25s`;
 with plain `docker run`, pass `--stop-timeout 25` (Docker's default is 10 s, which
@@ -205,7 +207,7 @@ license text prevails):
 | Display "Built with Llama" on a related website, user interface, blog post, about page or product documentation | This README, the root README and ADR 0020 state it; the image label `io.guardrail-serve.model.attribution` carries it. An operator who exposes a product built on this image must display it in their own documentation or interface. |
 | Comply with the Acceptable Use Policy and applicable law | Operator responsibility. |
 | Name any AI model trained or improved with Llama outputs "Llama ..." | Not applicable: nothing is trained or fine-tuned here. |
-| More than 700 million monthly active users need a separate license from Meta | Operator responsibility. |
+| A separate license from Meta is required in the 700-million-monthly-active-users case (conditions on the licensee and its affiliates, measured as the agreement defines) | Operator responsibility: read the commercial terms of the agreement; they are not restated here. |
 
 Using the weights requires the operator's own Hugging Face account to have been granted
 access to the gated repositories (a license acceptance made by that account). No image
@@ -272,15 +274,18 @@ the three above.
 `SEMANTIC_TIMEOUT` bounds the scan of **one text**, all chunk batches included.
 `MAX_TEXT_CHARS` (default `20000`) is counted across all texts of a request and
 chunks advance by about 446 characters (510 minus the 64 overlap), so a
-20 000-character text is about 45 chunks, around 5.6 s of CPU on the measured
-host plus overhead, split over two calls.
+20 000-character text is about 45 chunks, around 9 s of CPU with the 86M model at the
+measured 200 ms per chunk (L11 figure, extrapolated from 32 chunks in 6.5 s; the older
+5.6 s estimate was DeBERTa on a quieter host), plus overhead, split over two calls.
 
 - The Go default `2s` suits short chat messages only (up to about 10 chunks, 5 000
   characters). It already failed at 12 000 characters, so with
   `MAX_TEXT_CHARS=20000` legitimate long texts become 502 in fail-closed mode.
-- To accept the full default limit, use **at least 8-10 s at low load**
-  (`SEMANTIC_TIMEOUT=10s`, the Compose default), or lower `MAX_TEXT_CHARS`. The 5 s
-  of the previous Compose default failed at 19 000 characters.
+- To accept the full default limit, `SEMANTIC_TIMEOUT` must exceed about 9 s at low
+  load, so the Compose default of `10s` leaves almost no margin and a loaded sidecar
+  will time out on the largest texts: use **15 s or more**, or lower
+  `MAX_TEXT_CHARS`. (The default is unchanged by L11; the DeBERTa model had the same
+  per-chunk cost in the same measurement.)
 - Recalibrate under your real concurrency. A text waits for every request ahead of
   it because inference is serialized: with `HTTP_MAX_CONCURRENT_REQUESTS=2` (the Go
   default) a maximum-size request can wait for another maximum-size one, so size
@@ -292,7 +297,7 @@ host plus overhead, split over two calls.
   hangs can make a request last up to `texts x SEMANTIC_TIMEOUT`, longer than the
   write timeout, so keep the sidecar healthy or use fail-closed.
 - `SIDECAR_INFERENCE_TIMEOUT_SECONDS` applies to each HTTP call (at most 32
-  chunks, about 4 s at low load) and includes the wait for the inference slot.
+  chunks, about 6.5 s at low load with the 86M model) and includes the wait for the inference slot.
   Keep it at or below the client timeout so abandoned calls stop soon after the
   client gives up, and above the latency of one call under your concurrency.
 
@@ -309,7 +314,8 @@ running cannot be interrupted, so it is observed only between micro-batches
 (`SIDECAR_BATCH_SIZE` texts each) and once more before the response. A
 micro-batch that starts before the deadline runs to completion, so the overrun is
 bounded by the duration of one micro-batch. Observed: 32 texts of 512 tokens with
-a 10 s deadline answered 504 after 16.3 s (two micro-batches of about 8 s). Typical
+a 10 s deadline answered 504 after 16.3 s with DeBERTa (L10) and after 17.8 s with the
+86M model (L11), two micro-batches of about 8 s. Typical
 client chunks (about 130 tokens) take about 1 s per micro-batch. A lower
 `SIDECAR_BATCH_SIZE` shortens the worst-case overrun; its effect on throughput was
 not measured, so the default stays `8`. The unit tests prove the cooperative
