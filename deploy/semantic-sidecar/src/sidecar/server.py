@@ -11,6 +11,7 @@ deadline. Logs and error bodies never contain input text, headers or tokens.
 
 from __future__ import annotations
 
+import functools
 import json
 import socket
 import sys
@@ -41,6 +42,9 @@ class Application:
         self.inference_lock = threading.Lock()
         self._log = log if log is not None else sys.stderr
         self._log_lock = threading.Lock()
+        self._state = threading.Condition()
+        self._active = 0
+        self._draining = False
 
     def set_backend(self, backend: Backend) -> None:
         self.backend = backend
@@ -49,12 +53,78 @@ class Application:
     def ready(self) -> bool:
         return self.backend is not None
 
+    # --- shutdown --------------------------------------------------------------
+
+    @property
+    def draining(self) -> bool:
+        return self._draining
+
+    @property
+    def active(self) -> int:
+        """Requests currently being handled (idle keep-alive connections do not count)."""
+        with self._state:
+            return self._active
+
+    def enter(self) -> bool:
+        """Count one request as active; False once draining, so admission is closed."""
+        with self._state:
+            if self._draining:
+                return False
+            self._active += 1
+            return True
+
+    def leave(self) -> None:
+        with self._state:
+            self._active -= 1
+            if self._active == 0:
+                self._state.notify_all()
+
+    def begin_drain(self) -> None:
+        """Stop admitting requests. Idempotent; only the first call logs."""
+        with self._state:
+            first = not self._draining
+            self._draining = True
+            active = self._active
+        if first:
+            self.log("draining", active=active)
+
+    def wait_idle(self, timeout: float) -> int:
+        """Wait until no request is active, at most `timeout` seconds. Returns how many remain."""
+        deadline = time.monotonic() + timeout
+        with self._state:
+            while self._active:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._state.wait(left)
+            return self._active
+
     def log(self, event: str, **fields: Any) -> None:
         """One JSON line. Callers pass only fixed, non-sensitive fields."""
         record = {"ts": round(time.time(), 3), "event": event, **fields}
         with self._log_lock:
             self._log.write(json.dumps(record, separators=(",", ":")) + "\n")
             self._log.flush()
+
+
+def _tracked(method: Callable[["Handler"], None]) -> Callable[["Handler"], None]:
+    """Count a request as active while it is handled; refuse it once the server is draining."""
+
+    @functools.wraps(method)
+    def wrapper(self: "Handler") -> None:
+        app = self.server.app
+        if not app.enter():
+            length = self.headers.get("Content-Length", "")
+            self._unread = int(length) if length.isascii() and length.isdigit() else 0
+            self._begin()
+            self._fail(503, "shutting_down")
+            return
+        try:
+            method(self)
+        finally:
+            app.leave()
+
+    return wrapper
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -90,6 +160,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
+        if self.server.app.draining:
+            self.close_connection = True  # let the client reconnect elsewhere
         if self.close_connection:
             self.send_header("Connection", "close")
         self.end_headers()
@@ -116,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- routes ----------------------------------------------------------------
 
+    @_tracked
     def do_GET(self) -> None:
         path = self._begin()
         app = self.server.app
@@ -131,6 +204,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._respond(404, {"error": "not_found"})
 
+    @_tracked
     def do_POST(self) -> None:
         path = self._begin()
         if path != CLASSIFY_PATH:
@@ -139,6 +213,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._classify()
 
+    @_tracked
     def _method_not_allowed(self) -> None:
         self._begin()
         self.close_connection = True
@@ -349,7 +424,10 @@ class BoundedServer(ThreadingHTTPServer):
         self.app.log("connection_error", kind=type(exc).__name__)
 
 
-def load_backend_async(app: Application, server: BoundedServer, factory: Callable[[], Backend]) -> threading.Thread:
+def load_backend_async(
+    app: Application, server: BoundedServer, factory: Callable[[], Backend],
+    on_ready: Callable[[], None] | None = None,
+) -> threading.Thread:
     """Load the model off the serving thread; shut the server down if it fails."""
 
     def run() -> None:
@@ -362,6 +440,8 @@ def load_backend_async(app: Application, server: BoundedServer, factory: Callabl
             server.shutdown()
             return
         app.log("model_ready", model=app.config.model_label, seconds=round(time.monotonic() - started, 1))
+        if on_ready is not None:
+            on_ready()
 
     thread = threading.Thread(target=run, name="model-loader", daemon=True)
     thread.start()

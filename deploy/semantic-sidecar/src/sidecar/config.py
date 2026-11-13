@@ -37,6 +37,7 @@ class Config:
     inference_timeout: float
     batch_size: int
     torch_threads: int
+    shutdown_grace: float
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
@@ -104,6 +105,8 @@ class Config:
             inference_timeout=seconds("SIDECAR_INFERENCE_TIMEOUT_SECONDS", 10.0),
             batch_size=integer("SIDECAR_BATCH_SIZE", 8, 1, 256),
             torch_threads=integer("SIDECAR_TORCH_THREADS", 0, 0, 256),
+            # Upper bound on how long SIGTERM waits for in-flight requests (see README, "Shutdown").
+            shutdown_grace=seconds("SIDECAR_SHUTDOWN_GRACE_SECONDS", 20.0),
         )
 
     @property

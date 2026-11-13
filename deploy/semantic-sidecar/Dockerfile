@@ -68,6 +68,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=3 \
     CMD ["python", "-m", "sidecar", "healthcheck"]
 
-# Exec form: the server is PID 1 and handles SIGTERM for a graceful shutdown.
+# Exec form: the server is PID 1 and drains in-flight requests on SIGTERM, bounded by
+# SIDECAR_SHUTDOWN_GRACE_SECONDS (README, "Shutdown"). Stop it with a timeout above that bound.
 ENTRYPOINT ["python", "-m", "sidecar"]
 CMD ["serve"]

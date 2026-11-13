@@ -9,8 +9,13 @@ rationale: [ADR 0019](../../docs/adr/0019-real-semantic-sidecar.md).
 > (`codex-dev`, head `857e02c`): image build, model load, label mapping, the
 > `scores` contract, token limits, container hardening, the Go service against the
 > sidecar (fail-closed 502, fail-open warning) and the latencies below.
-> **`integration_pending`: the Compose stack** (`compose up`, the isolated network,
-> `depends_on`, restart and graceful SIGTERM) at the final head. The default model is
+> The Compose stack was run on the build host at head `75cd4d4` (103 of 104
+> assertions): `depends_on`/readiness, the `internal: true` network (egress blocked),
+> hardening, the contract with the real model, the guardrail API, timeouts and
+> restarts. The one failure, the sidecar cutting in-flight requests on SIGTERM, is
+> fixed by the bounded drain in "Shutdown". **`integration_pending`: the targeted
+> Docker retest of that graceful stop** on the final head; the drain itself is covered
+> by process-level tests with a fake backend. The default model is
 > English only and was measured on the French corpora: at threshold `0.9` it adds 2
 > true positives and 26 false positives on the French injection corpus, so it is
 > not suitable as a French blocking detector (use `annotate`). See
@@ -87,8 +92,8 @@ declared `internal: true`, so it has no route outside the stack; the `guardrail`
 service joins both that network and the default one to publish its port. This
 matters because a container on the default bridge could open outbound
 connections (observed from a plain `docker run`), which the runtime never needs.
-The Compose stack itself has not been run yet (`integration_pending`): verify
-after `up` that the sidecar cannot reach the Internet, for example with
+The Compose stack was run on the build host at `75cd4d4` and the sidecar could not
+reach the Internet there. To verify it yourself after `up`, for example use
 `docker compose -f deploy/semantic-sidecar/compose.yaml exec semantic-sidecar python -c "import urllib.request as u; u.urlopen('https://1.1.1.1', timeout=3)"`,
 which must fail. A standalone `docker run` (used for validation) is on the
 default bridge and not isolated; add `--network none` if you do not need to
@@ -121,6 +126,33 @@ CPython 3.13 virtual environment, download the snapshot with
 | `SIDECAR_INFERENCE_TIMEOUT_SECONDS` | `10` | Cooperative deadline from request start (queue wait + inference), observed between micro-batches only. |
 | `SIDECAR_BATCH_SIZE` | `8` | Texts per forward pass. The deadline overrun is bounded by one micro-batch, so a smaller value shortens it (throughput effect not measured). |
 | `SIDECAR_TORCH_THREADS` | `0` | PyTorch intra-op threads (`0` keeps the default). |
+| `SIDECAR_SHUTDOWN_GRACE_SECONDS` | `20` | Upper bound on how long SIGTERM/SIGINT waits for in-flight requests (see "Shutdown"). |
+
+### Shutdown
+
+On SIGTERM or SIGINT the sidecar:
+
+1. **stops admitting** requests: new requests, including those on an idle keep-alive
+   connection, get `503 {"error":"shutting_down"}` and `Connection: close`, and the
+   listening socket is closed so no new connection is accepted;
+2. **lets in-flight requests finish** normally (a request being read, queued for the
+   inference lock or running inference), answering them with `Connection: close`;
+3. exits `0` once none is left (`drained`), or after at most
+   `SIDECAR_SHUTDOWN_GRACE_SECONDS` (`drain_timeout` logged with the number of
+   requests cut). Idle keep-alive connections never delay the exit.
+
+The wait is bounded on purpose: the handler threads stay daemon threads, so a
+stuck backend or a client that stalls inside its body cannot hold the process
+beyond the grace period (an unbounded join could outlive the container stop timeout and
+end in SIGKILL anyway). The bound is sized from the cooperative inference deadline:
+a request already running at SIGTERM ends within `SIDECAR_INFERENCE_TIMEOUT_SECONDS`
+plus at most one micro-batch overrun (16.5 s observed for 32 texts of 512 tokens,
+10 s deadline, batch 8), so the `20` default covers it. **Keep the container stop
+timeout above the grace period**: the Compose file sets `stop_grace_period: 25s`;
+with plain `docker run`, pass `--stop-timeout 25` (Docker's default is 10 s, which
+would cut the longest requests). If you raise the inference deadline or the batch
+size, raise both values. Events on stderr: `draining`, `stopped_accepting`, then
+`drained` or `drain_timeout`.
 
 ## Measured results and limits
 
@@ -159,8 +191,8 @@ French corpus quality was measured separately (threshold `0.9`, same image):
 model adds 2 true positives and 26 false positives on the 62-case French injection
 corpus, and about 170 ms p50 per sequential request through the Go service.
 
-Not validated: the Compose stack, restart and SIGTERM behavior, other CPUs or higher
-concurrency, other models or thresholds.
+Not validated: the Docker retest of the graceful stop after the fix described in
+"Shutdown", other CPUs or higher concurrency, other models or thresholds.
 
 ### Choosing `SEMANTIC_TIMEOUT` for your text limit
 
@@ -281,3 +313,6 @@ go test ./tests/integration/semantic_sidecar/...
 ```
 
 The fake backend lives in `tests/` and is never copied into the image.
+`tests/test_shutdown.py` starts the real server process (`run_fake_server.py` runs the
+production `serve()`, signal handlers included) with a file-gated fake backend and
+checks the shutdown contract deterministically; it needs no Docker and no model.

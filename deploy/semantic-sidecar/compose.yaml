@@ -58,6 +58,8 @@ services:
       SIDECAR_INFERENCE_TIMEOUT_SECONDS: ${SIDECAR_INFERENCE_TIMEOUT_SECONDS:-10}
       SIDECAR_BATCH_SIZE: ${SIDECAR_BATCH_SIZE:-8}
       SIDECAR_TORCH_THREADS: ${SIDECAR_TORCH_THREADS:-2}
+      # SIGTERM waits at most this long for in-flight requests; stop_grace_period must stay above it.
+      SIDECAR_SHUTDOWN_GRACE_SECONDS: ${SIDECAR_SHUTDOWN_GRACE_SECONDS:-20}
     expose:
       - "8080"
     read_only: true
@@ -69,6 +71,9 @@ services:
     mem_limit: 2g
     cpus: 2
     restart: unless-stopped
+    # Above SIDECAR_SHUTDOWN_GRACE_SECONDS (20), which covers the 10 s inference deadline plus one
+    # micro-batch overrun (16.5 s observed in the worst case).
+    stop_grace_period: 25s
     networks: [sidecar]
 
 networks:

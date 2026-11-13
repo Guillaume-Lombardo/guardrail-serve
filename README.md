@@ -550,9 +550,13 @@ docker compose -f deploy/semantic-sidecar/compose.yaml up --build   # build host
 **Status.** Validated with the real model on the build host (`codex-dev`, head
 `857e02c`): image build, model load, labels (`SAFE`/`INJECTION`), the `scores`
 contract, token limits, container hardening, and the Go service against the sidecar
-(fail-closed 502, fail-open `semantic classifier degraded` warning). **Still
-`integration_pending`:** the Compose stack (`compose up`, isolated network,
-restart, SIGTERM) at the final head.
+(fail-closed 502, fail-open `semantic classifier degraded` warning). The Compose
+stack then ran on the build host at `75cd4d4` (103 of 104 assertions: readiness,
+isolated network, hardening, API, timeouts, restarts); its one failure, the sidecar
+cutting in-flight requests on SIGTERM, is fixed by a bounded drain
+(`SIDECAR_SHUTDOWN_GRACE_SECONDS`, default 20 s; Compose `stop_grace_period: 25s`).
+**Still `integration_pending`:** the targeted Docker retest of that graceful stop on
+the final head.
 
 **French quality (measured, threshold `0.9`).** On the 62-case French injection
 corpus the deterministic detector scores 29 TP / 1 FP / 30 TN / 2 FN (recall 93.5%,

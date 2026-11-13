@@ -503,6 +503,12 @@ the orchestrator.
   disabled by default; the example policy and docs follow it. Summary in
   `deploy/semantic-sidecar/EVALUATION.md`. No detector, rule, corpus, baseline or
   threshold change.
-- [ ] `integration_pending`: the Compose stack with restart/SIGTERM revalidated
-  on the final head (orchestrator, `codex-dev`).
+- [x] Compose stack run on `codex-dev` at `75cd4d4`: 103 of 104 assertions green.
+  The one failure, the sidecar cutting in-flight requests on SIGTERM
+  (`daemon_threads=True`, no wait for handlers), is fixed in the same PR: bounded drain
+  (`SIDECAR_SHUTDOWN_GRACE_SECONDS`, default 20 s, `stop_grace_period: 25s`), with
+  process-level regression tests on a file-gated fake backend. Earlier
+  "graceful SIGTERM" claims were untested and are corrected in the docs.
+- [ ] `integration_pending`: targeted Docker retest of the sidecar graceful stop on the
+  final head (orchestrator, `codex-dev`).
 - [ ] PR CI and review of the final head: handed to the orchestrator.

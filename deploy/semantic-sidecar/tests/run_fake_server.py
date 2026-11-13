@@ -1,7 +1,9 @@
-"""Start the real server with a fake backend for black-box (Go) tests.
+"""Run the real `sidecar.__main__.serve()` (signal handling included) with a fake backend.
 
-Prints `LISTENING <port>` on stdout once the socket is bound and ready.
-Settings come from the SIDECAR_* environment, exactly like production.
+Prints `LISTENING <port>` on stdout once the fake backend is installed and the
+server is ready. Settings come from the SIDECAR_* environment, exactly like
+production; FAKE_DELAY_SECONDS, FAKE_ENTERED_FILE and FAKE_RELEASE_FILE tune the
+fake backend (see fake_backend.py).
 """
 
 from __future__ import annotations
@@ -14,23 +16,20 @@ sys.path.insert(0, os.path.join(HERE, "..", "src"))
 sys.path.insert(0, HERE)
 
 from fake_backend import FakeBackend  # noqa: E402
-from sidecar.config import Config  # noqa: E402
-from sidecar.server import Application, BoundedServer  # noqa: E402
+from sidecar.__main__ import serve  # noqa: E402
 
 
-def main() -> None:
-    config = Config.from_env()
-    app = Application(config)
-    app.set_backend(FakeBackend(delay=float(os.environ.get("FAKE_DELAY_SECONDS", "0"))))
-    server = BoundedServer((config.host, config.port), app)
-    print(f"LISTENING {server.server_address[1]}", flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+def make_backend(_config: object) -> FakeBackend:
+    return FakeBackend(
+        delay=float(os.environ.get("FAKE_DELAY_SECONDS", "0")),
+        entered_file=os.environ.get("FAKE_ENTERED_FILE") or None,
+        release_file=os.environ.get("FAKE_RELEASE_FILE") or None,
+    )
+
+
+def announce(port: int) -> None:
+    print(f"LISTENING {port}", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(serve(make_backend, announce))

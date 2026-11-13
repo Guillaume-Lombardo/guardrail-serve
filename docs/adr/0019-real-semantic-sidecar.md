@@ -108,8 +108,18 @@ reproducible checks, without touching the Go service's domain code.
   is logged or returned; exceptions are reported by class name only.
 - Non-root (uid 65532), read-only root filesystem, dropped capabilities,
   memory/CPU/pid limits in the compose file, liveness `GET /healthz`, readiness
-  `GET /readyz` (200 only after the model is loaded and warmed up), graceful
-  SIGTERM, fail-fast exit on model load failure.
+  `GET /readyz` (200 only after the model is loaded and warmed up), a bounded
+  graceful shutdown (below), fail-fast exit on model load failure.
+- Shutdown: on SIGTERM/SIGINT the server stops admitting requests (new and
+  keep-alive requests get 503 `shutting_down`, the listening socket is closed),
+  waits for the requests in flight, and exits 0. The wait is capped by
+  `SIDECAR_SHUTDOWN_GRACE_SECONDS` (default 20 s, above the 10 s cooperative
+  inference deadline plus the 16.5 s observed worst-case micro-batch overrun), and
+  the Compose `stop_grace_period` (25 s) stays above it. Handler threads remain
+  daemon threads and the wait is a bounded count of active requests, not a join: an
+  unbounded wait on a stuck backend or a stalled client would outlast the container
+  stop timeout and be killed anyway. Requests still running at the cap are cut and
+  logged (`drain_timeout`).
 - No sidecar authentication, consistent with ADR 0010: the sidecar publishes no
   port in the compose file and must stay on a private network. The compose file
   attaches it only to a network declared `internal: true` (no route outside the
@@ -127,9 +137,10 @@ reproducible checks, without touching the Go service's domain code.
   end to end, against the real Python server code with the fake backend (always
   run when `python3` exists). A build-tagged test (`realsidecar`) targets a
   running sidecar with the real model; it is excluded from GitHub CI.
+- `deploy/semantic-sidecar/tests/test_shutdown.py`: shutdown contract on a real
+  server process with a file-gated fake backend (deterministic, no Docker).
 - `deploy/semantic-sidecar/tools/measure.py`: corpus-independent recall, FPR
-  and latency reproducer, run against the shared evaluation corpus once it is
-  merged.
+  and latency reproducer (see `EVALUATION.md` for the run on the shared corpora).
 
 ## Validation status
 
@@ -146,8 +157,22 @@ described under "Changes after validation".
   (attack blocked; fail-closed 502 and fail-open warning). Latency is about 125 ms per
   510-character chunk on 2 shared vCPUs, linear, inference serialized (figures in the
   sidecar README). English only.
-- **`integration_pending`**: the Compose stack (`up`, internal network, `depends_on`,
-  restart, graceful SIGTERM) at the final head.
+- **Compose stack, run on the build host at `75cd4d4`** (images rebuilt at that
+  SHA; 103 of 104 assertions): `depends_on` with `service_healthy`, the
+  `internal: true` network (egress from the sidecar blocked, a control on the default
+  network open), hardening, the contract with the real model, the guardrail API in
+  front of it, long texts and timeouts, `compose restart`, a real crash restarted by
+  `unless-stopped`, and the guardrail's own SIGTERM drain. The one failure was
+  real: on SIGTERM the sidecar exited in about 0.9 s and cut an in-flight request
+  (`RemoteDisconnected` about 0.4 s after the signal), because
+  `daemon_threads=True` and `serve()` closed the server without waiting for the
+  handlers. Earlier statements that SIGTERM was graceful had not been tested.
+  Fixed by the bounded drain above, with process-level regression tests (SIGTERM
+  during a parked request; admission stopped; blocked backend and stalled client
+  bounded by the grace).
+- **`integration_pending`**: the targeted Docker retest of the sidecar's graceful
+  stop on the final head (`docker compose stop`/`kill -TERM` with a request in
+  flight).
 - **French quality, measured** after L9 merged (`main` at `d756fc3`, threshold `0.9`
   fixed beforehand, sequential, 3 repetitions; provenance and limits in
   [`EVALUATION.md`](../../deploy/semantic-sidecar/EVALUATION.md)). On the 62-case
@@ -168,8 +193,9 @@ described under "Changes after validation".
 
 The micro-batch loop moved into a backend-independent function so the cooperative
 deadline is unit-tested with a simulated clock, and the compose file gained the
-internal network and the 10 s default. These need re-validation of the Compose
-stack on the build host.
+internal network and the 10 s default. The Compose run above found the SIGTERM
+defect; the shutdown drain, `SIDECAR_SHUTDOWN_GRACE_SECONDS` and the compose
+`stop_grace_period` were added afterwards and need the targeted retest listed above.
 
 ## Consequences
 
