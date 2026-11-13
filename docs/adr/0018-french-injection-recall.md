@@ -59,8 +59,10 @@ lookaround and no backreferences.
    - it lies entirely inside a paired quotation (« », “ ”, "). The quotation
      is at most 400 bytes;
    - the text outside every quotation contains an analysis cue (explain,
-     translate, what does it mean, injection, article…) and no execution cue
-     (execute, apply, follow, obey…).
+     translate, what does it mean, injection, article…) and no affirmative
+     execution cue (execute, apply, follow, obey…). A negated cue ("sans
+     l'exécuter", "ne l'applique pas") does not cancel the exemption; one
+     affirmative cue elsewhere in the frame does.
 
    An unpaired quotation, an overlong one, or a match in the frame is never
    exempt.
