@@ -118,7 +118,7 @@ policies:
   one replacement using the mask of the earliest chain step; touching spans
   merge only when they render the same mask.
 - `{TYPE}` in a mask expands to the finding type, such as `EMAIL`,
-  `PHONE_NUMBER`, `IBAN`, `IP_ADDRESS`, `CREDIT_CARD`, `PASSWORD`, `API_KEY`
+  `PHONE_NUMBER`, `IBAN`, `IP_ADDRESS`, `CREDIT_CARD`, `PASSWORD`, `API_KEY`,
   `SECRET`, `HIGH_ENTROPY_STRING` or `PROMPT_INJECTION`. Pattern files set it per rule with `type:`; rules
   without it use `SECRET`, `PII` or `PROMPT_INJECTION`. `detect_secret` and
   `detect_pii` rules must contain a `(?P<secret>...)` group.
@@ -519,8 +519,8 @@ native scanner entirely**, retaining legacy regex matching on original text,
 named `secret` captures, rule names and types. An empty override disables secret
 detection. A missing file enables native defaults even when other overrides
 exist. Remove the secrets override to migrate; copied older defaults retain
-older behavior until removed. The embedded empty YAML is an override template,
-not the native rule configuration. No environment variables changed.
+older behavior until removed. No secrets YAML is shipped in the default-resource directory, so copying
+that directory to customize other resources keeps native detection enabled. No environment variables changed.
 
 Detection is heuristic, not exhaustive: plain unquoted word passwords,
 multi-line YAML values, encoded secrets and some prose labels can be missed;

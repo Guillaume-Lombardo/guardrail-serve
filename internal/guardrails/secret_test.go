@@ -15,11 +15,14 @@ func TestSecretNativeProjectsOriginalBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	scanner, err := secrets.New(secrets.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// NFKC expansion and stripped runes inside the value must map to original
 	// byte spans, including complete graphemes, not scanner rune offsets.
 	for _, text := range []string{"Été 🙂 password=Tr0u\u200bb4dor&3x", "🙂 password=ﬁve9Pass\u0301", "mot de pa\u200bsse：Tr0ub4dor9"} {
 		norm := textnorm.Normalize(text)
-		scanner, _ := secrets.New(secrets.DefaultConfig())
 		fs, err := scanner.Scan(context.Background(), norm.Text())
 		if err != nil {
 			t.Fatal(err)
@@ -32,7 +35,10 @@ func TestSecretNativeProjectsOriginalBytes(t *testing.T) {
 			t.Fatal("missing findings")
 		}
 		for i, f := range fs {
-			span, _ := norm.OriginalBytes(f.ByteStart, f.ByteEnd)
+			span, err := norm.OriginalBytes(f.ByteStart, f.ByteEnd)
+			if err != nil {
+				t.Fatal(err)
+			}
 			got := ds[i]
 			if got.Start != span.Start || got.End != span.End || got.Type != f.Type || got.Rule != f.Rule {
 				t.Fatal("incorrect original projection")

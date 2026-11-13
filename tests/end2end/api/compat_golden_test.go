@@ -2,8 +2,6 @@ package api_test
 
 import (
 	"encoding/json"
-	"github.com/g1lom/guardrail-serve/internal/app"
-	"github.com/g1lom/guardrail-serve/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +9,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/g1lom/guardrail-serve/internal/app"
+	"github.com/g1lom/guardrail-serve/internal/config"
 )
 
 // testdata/compat_golden.json was recorded from the pre-policy-engine

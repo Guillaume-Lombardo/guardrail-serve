@@ -2,12 +2,13 @@ package api_test
 
 import (
 	"encoding/json"
-	"github.com/g1lom/guardrail-serve/internal/app"
-	"github.com/g1lom/guardrail-serve/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/g1lom/guardrail-serve/internal/app"
+	"github.com/g1lom/guardrail-serve/internal/config"
 )
 
 func TestNativeSecretsJourneys(t *testing.T) {
@@ -91,6 +92,45 @@ policies:
 		got := decodePolicy(t, post(t, h, "/v1/guardrails/detect_secret", string(body)))
 		if len(got.Findings) != 2 || got.Texts[0] != "🙂 password=[SECRET]" || got.Texts[1] != "[HIGH_ENTROPY_STRING]" || got.Findings[1].Score == nil {
 			t.Fatal("typed masks, overlap precedence or entropy score contract")
+		}
+	}
+}
+
+func TestCopyingDefaultResourcesKeepsSecretsEnabled(t *testing.T) {
+	dir := t.TempDir()
+	defaults := "../../../internal/resources/defaults"
+	entries, err := os.ReadDir(defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(defaults, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, entry.Name()), content, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h, err := app.NewHandler(config.Config{GuardrailsConfigDir: dir, SecretMask: "[REDACTED]", MaxTextItems: 20, MaxTextChars: 20000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decodePolicy(t, post(t, h, "/v1/guardrails/detect_secret", `{"texts":["password=Tr0ub4dor9"]}`))
+	if got.Texts[0] != "password=[REDACTED]" || len(got.Findings) == 0 {
+		t.Fatal("copying default resources disabled secrets")
+	}
+}
+
+func TestNativeSecretLiteLLMInvalidTextBothStages(t *testing.T) {
+	h := newTestHandler(t)
+	for _, stage := range []string{"request", "response"} {
+		r := post(t, h, "/beta/litellm_basic_guardrail_api", `{"texts":["password=Tr0ub4dor9","bad\ufffdvalue"],"input_type":"`+stage+`"}`)
+		if r.Code != 502 || strings.TrimSpace(r.Body.String()) != `{"detail":"Guardrail execution failed."}` {
+			t.Fatal("native-only LiteLLM must fail safely without partial results")
 		}
 	}
 }

@@ -217,6 +217,9 @@ git SHA is still reported when it is assigned to a secret key.
 
 ## Known limits
 
+- Nested secret labels (`mdp: mot de passe: hunter2`) can be missed when the
+  outer key itself names a secret. Non-secret outer prose labels are rescanned.
+
 - Unquoted plain-word passwords (`password: sunshine`) and `--password value`
   without an operator are not reported (prose false positives would
   dominate).
