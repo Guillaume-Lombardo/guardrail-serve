@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/g1lom/guardrail-serve/internal/config"
 	"github.com/g1lom/guardrail-serve/internal/domain"
 	"github.com/g1lom/guardrail-serve/internal/guardrails"
 	"github.com/g1lom/guardrail-serve/internal/httpapi"
 	"github.com/g1lom/guardrail-serve/internal/observability"
+	"github.com/g1lom/guardrail-serve/internal/policy"
 	"github.com/g1lom/guardrail-serve/internal/resources"
 )
 
@@ -59,24 +61,67 @@ func NewHandlerWithLogger(cfg config.Config, logger *slog.Logger) (http.Handler,
 		return nil, fmt.Errorf("load prompt injection patterns: %w", err)
 	}
 
-	secretGuardrail, err := guardrails.NewDetectSecretGuardrail(cfg.SecretMask, secretPatterns)
+	secret, err := guardrails.NewSecretDetector(secretPatterns)
 	if err != nil {
-		return nil, fmt.Errorf("build detect_secret guardrail: %w", err)
+		return nil, fmt.Errorf("build detect_secret detector: %w", err)
 	}
-	piiGuardrail, err := guardrails.NewDetectPIIGuardrail(cfg.SecretMask, piiPatterns)
+	pii, err := guardrails.NewPIIDetector(piiPatterns)
 	if err != nil {
-		return nil, fmt.Errorf("build detect_pii guardrail: %w", err)
+		return nil, fmt.Errorf("build detect_pii detector: %w", err)
 	}
-	promptGuardrail, err := guardrails.NewPromptInjectionGuardrail(promptPatterns)
+	prompt, err := guardrails.NewPromptInjectionDetector(promptPatterns)
 	if err != nil {
-		return nil, fmt.Errorf("build prompt_injection guardrail: %w", err)
+		return nil, fmt.Errorf("build prompt_injection detector: %w", err)
+	}
+	detectors := map[string]domain.Detector{secret.Name(): secret, pii.Name(): pii, prompt.Name(): prompt}
+
+	defaultMask := policy.LiteralMask(cfg.SecretMask)
+	content, source, err := resources.LoadPolicies(cfg.GuardrailsConfigDir)
+	if err != nil {
+		return nil, fmt.Errorf("load policies: %w", err)
+	}
+	catalog, err := policy.Parse(content, source, detectors, defaultMask)
+	if err != nil {
+		return nil, fmt.Errorf("load policies: %w", err)
+	}
+	if cfg.LiteLLMDefaultPolicy == "" {
+		cfg.LiteLLMDefaultPolicy = config.DefaultLiteLLMPolicy
+	}
+	if _, ok := catalog.Get(cfg.LiteLLMDefaultPolicy); !ok {
+		return nil, fmt.Errorf("LITELLM_DEFAULT_POLICY %q is not defined in %s (defined: %s)",
+			cfg.LiteLLMDefaultPolicy, source, strings.Join(catalog.Names(), ", "))
+	}
+	scan, err := scanPolicies(secret, pii, prompt, defaultMask)
+	if err != nil {
+		return nil, err
 	}
 
-	maxLengthGuardrail := guardrails.NewMaxLengthGuardrail(cfg.MaxTextItems, cfg.MaxTextChars)
-	registry := domain.NewRegistry(maxLengthGuardrail, secretGuardrail, piiGuardrail, promptGuardrail)
-	apiHandler := httpapi.NewHandler(cfg, logger, registry, maxLengthGuardrail, secretGuardrail, piiGuardrail, promptGuardrail)
+	engine := policy.NewEngine(guardrails.NewMaxLengthGuardrail(cfg.MaxTextItems, cfg.MaxTextChars))
+	apiHandler := httpapi.NewHandler(cfg, logger, engine, catalog, scan)
 
 	mux := http.NewServeMux()
 	apiHandler.Register(mux)
 	return runtimeHandler(cfg, apiHandler.WithObservability(mux)), nil
+}
+
+// scanPolicies reproduces the historical /scan contracts: one detector on both
+// stages, enforced, masking with SECRET_MASK or blocking prompt injections.
+func scanPolicies(secret, pii domain.Detector, prompt *guardrails.RegexDetector, mask policy.Mask) (httpapi.ScanPolicies, error) {
+	single := func(detector domain.Detector, action domain.Action) (*policy.Policy, error) {
+		steps := []policy.Step{{Detector: detector, Action: action, Mask: mask}}
+		return policy.NewPolicy("scan-"+strings.ReplaceAll(detector.Name(), "_", "-"), domain.ModeEnforce, steps, steps)
+	}
+	var scan httpapi.ScanPolicies
+	var err error
+	if scan.Secrets, err = single(secret, domain.ActionMask); err != nil {
+		return scan, err
+	}
+	if scan.PII, err = single(pii, domain.ActionMask); err != nil {
+		return scan, err
+	}
+	if scan.PromptInjection, err = single(prompt, domain.ActionBlock); err != nil {
+		return scan, err
+	}
+	scan.PromptInjectionRules = prompt.Rules()
+	return scan, nil
 }

@@ -37,3 +37,18 @@ func TestLoadPatternsFallsBackToEmbeddedDefaultsWhenOverrideMissing(t *testing.T
 		t.Fatal("patterns is empty, want embedded defaults")
 	}
 }
+
+func TestLoadPoliciesReportsSource(t *testing.T) {
+	content, source, err := LoadPolicies("")
+	if err != nil || len(content) == 0 || source != "embedded defaults/policies.yaml" {
+		t.Fatalf("embedded: source=%q len=%d err=%v", source, len(content), err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, PolicyFileName)
+	if err := os.WriteFile(path, []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if content, source, err = LoadPolicies(dir); err != nil || source != path || string(content) != "version: 1\n" {
+		t.Fatalf("override: source=%q content=%q err=%v", source, content, err)
+	}
+}

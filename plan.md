@@ -175,7 +175,7 @@ Status: validated by Guillaume; delivery in serialized merges after parallel wav
 
 - [x] L1: LiteLLM contract compatibility, strict scan routes, metadata and text alignment.
 - [x] L2: Runtime and authentication.
-- [ ] L3: Policy engine and findings.
+- [x] L3: Policy engine and findings.
 - [ ] L4: French normalization and PII.
 - [ ] L5: Native secrets with entropy/gitleaks.
 - [ ] L6: Optional HTTP classifier.
@@ -229,3 +229,38 @@ Authorized final corrective PR, based on main 6364b043ecac6164bf77854ea3f3514b97
 - Regression tests written and observed failing before fixes. Preserve strict scan,
   permissive LiteLLM and C1 input/output scopes; no archive, Docker or production work.
 - Validate all Go suites and pre-commit, independent review, one open unmerged PR.
+
+## L3 — Policy engine and findings
+
+Validated scope (wave 2, central lot), based on main 6eeac11ada08ad379358cbf93dec4062e67c2a64.
+- Shared domain-level engine (`internal/policy`) independent of HTTP and providers;
+  typed `Stage`/`Action`/`Mode` enums with explicit parsing.
+- Findings `{text_index, detector, type, rule, start, end, score?, action}` with
+  rune offsets into the original text (start inclusive, end exclusive), sorted
+  deterministically, never carrying values; logs record counts only.
+- Named YAML policies (schema version 1, embedded or whole-file override) with
+  ordered per-stage chains, block/mask/annotate actions and enforce/detect modes,
+  strictly validated at startup; no fallback to another policy.
+- Typed masks (`{TYPE}`), deterministic overlap merging that keeps original
+  offsets and 1:1 text alignment.
+- `POST /v1/guardrails/{policy}` documented in OpenAPI; LiteLLM selection through
+  `additional_provider_specific_params.policy` with `LITELLM_DEFAULT_POLICY`
+  fallback (legacy `LITELLM_GUARDRAIL_NAME` alias); `/scan/*` reimplemented on the
+  engine with unchanged contracts.
+- One shared regex detector replaces the detect_pii/detect_secret duplication.
+- Out of scope: L4 normalization/French PII/checksums, L5 entropy/gitleaks, L6
+  HTTP classifier, Docker, metrics, evaluation CI, `archive/`.
+- ADR: `docs/adr/0007-policy-engine-and-findings.md`.
+
+Delivered:
+- Engine, schema and catalog in `internal/policy`; detectors in
+  `internal/guardrails/regex.go`; embedded `policies.yaml` with the legacy single
+  detector policies plus `default` and `audit`; typed pattern rules.
+- `/scan/*` and the default LiteLLM policy are guarded by a golden corpus recorded
+  from the previous implementation (`tests/end2end/api/testdata/compat_golden.json`).
+- Tests: engine and schema unit tests (multi-detector input/output chains, all
+  actions in both modes, Unicode typed masks, overlaps, limits, detector errors,
+  invalid configurations), integration tests (overrides, startup errors), and
+  end-to-end tests (policy route, LiteLLM policy selection, OpenAPI, logs, auth
+  and body limits on the new route).
+- Environment: `LITELLM_DEFAULT_POLICY` added to `.env.template` and local `.env`.

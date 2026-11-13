@@ -1,11 +1,16 @@
 patterns:
   - name: ignore_instructions
+    type: PROMPT_INJECTION
     regex: '(?i)\b(ignore|disregard|override)\b.{0,40}\b(previous|prior|above|system|developer)\b.{0,40}\b(instructions?|prompt)\b'
   - name: reveal_prompt
+    type: PROMPT_INJECTION
     regex: '(?i)\b(reveal|show|print|dump|display)\b.{0,40}\b(system|developer|hidden)\b.{0,20}\b(prompt|instructions?)\b'
   - name: bypass_safety
+    type: PROMPT_INJECTION
     regex: '(?i)\b(bypass|disable|ignore)\b.{0,30}\b(safety|guardrails?|restrictions?|filters?)\b'
   - name: tool_exfiltration
+    type: PROMPT_INJECTION
     regex: '(?i)\b(show|list|dump|print)\b.{0,30}\b(tools?|functions?|schemas?)\b'
   - name: role_override
+    type: PROMPT_INJECTION
     regex: '(?i)\byou are now\b.{0,40}\b(system|developer|root|admin)\b'

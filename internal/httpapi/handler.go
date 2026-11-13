@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,37 +14,53 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/g1lom/guardrail-serve/internal/config"
 	"github.com/g1lom/guardrail-serve/internal/domain"
-	"github.com/g1lom/guardrail-serve/internal/guardrails"
 	"github.com/g1lom/guardrail-serve/internal/observability"
+	"github.com/g1lom/guardrail-serve/internal/policy"
 )
 
-type Handler struct {
-	config    config.Config
-	logger    *slog.Logger
-	registry  domain.Registry
-	maxLength domain.Guardrail
-	secret    domain.Guardrail
-	pii       domain.Guardrail
-	prompt    domain.Guardrail
+// limitsGuardrail names the payload limit check in /scan metadata and logs.
+const limitsGuardrail = "max_length"
+
+// ScanPolicies holds the fixed single-detector policies behind /scan/*.
+// They are built in code so policy file overrides never change these routes.
+type ScanPolicies struct {
+	Secrets              *policy.Policy
+	PII                  *policy.Policy
+	PromptInjection      *policy.Policy
+	PromptInjectionRules []string
 }
 
-func NewHandler(
-	cfg config.Config,
-	logger *slog.Logger,
-	registry domain.Registry,
-	maxLength domain.Guardrail,
-	secret domain.Guardrail,
-	pii domain.Guardrail,
-	prompt domain.Guardrail,
-) *Handler {
+type scanRoute struct {
+	path, operationID, description string
+	guardrail                      string
+	policy                         *policy.Policy
+	reportRules                    []string
+}
+
+type Handler struct {
+	config  config.Config
+	logger  *slog.Logger
+	engine  *policy.Engine
+	catalog *policy.Catalog
+	scan    []scanRoute
+}
+
+// NewHandler wires transports to the policy engine. The caller validates that
+// cfg.LiteLLMDefaultPolicy exists in catalog.
+func NewHandler(cfg config.Config, logger *slog.Logger, engine *policy.Engine, catalog *policy.Catalog, scan ScanPolicies) *Handler {
 	return &Handler{
-		config:    cfg,
-		logger:    logger,
-		registry:  registry,
-		maxLength: maxLength,
-		secret:    secret,
-		pii:       pii,
-		prompt:    prompt,
+		config:  cfg,
+		logger:  logger,
+		engine:  engine,
+		catalog: catalog,
+		scan: []scanRoute{
+			{path: "/scan/secrets", operationID: "scanSecrets", description: "Detect secrets in text payloads.", guardrail: "detect_secret", policy: scan.Secrets},
+			{path: "/scan/pii", operationID: "scanPII", description: "Detect PII in text payloads.", guardrail: "detect_pii", policy: scan.PII},
+			{
+				path: "/scan/prompt-injection", operationID: "scanPromptInjection", description: "Detect prompt-injection patterns in text payloads.",
+				guardrail: "prompt_injection", policy: scan.PromptInjection, reportRules: append([]string{}, scan.PromptInjectionRules...),
+			},
+		},
 	}
 }
 
@@ -67,29 +84,45 @@ func (h *Handler) Register(mux *http.ServeMux) {
 		Tags:         []string{"system"},
 	}, h.handleHealth)
 
-	h.registerGuardrailOperation(api, "/scan/secrets", "scanSecrets", "Detect secrets in text payloads.", h.secret)
-	h.registerGuardrailOperation(api, "/scan/pii", "scanPII", "Detect PII in text payloads.", h.pii)
-	h.registerGuardrailOperation(api, "/scan/prompt-injection", "scanPromptInjection", "Detect prompt-injection patterns in text payloads.", h.prompt)
+	for _, route := range h.scan {
+		h.registerScanOperation(api, route)
+	}
+
+	huma.Register(api, huma.Operation{
+		MaxBodyBytes: (1 << 20) + 1,
+		OperationID:  "evaluatePolicy",
+		Method:       http.MethodPost,
+		Path:         policyRoute,
+		Summary:      "Evaluate a named policy",
+		Description: "Runs the ordered detector chain of the named policy for the stage selected by input_type " +
+			"and returns findings with rune offsets into the original texts. Unknown policies return 404.",
+		Tags:   []string{"policy", "v1"},
+		Errors: []int{http.StatusNotFound, http.StatusBadGateway},
+	}, h.handlePolicy)
 
 	huma.Register(api, huma.Operation{
 		MaxBodyBytes: (1 << 20) + 1,
 		OperationID:  "scanLiteLLMBasicGuardrail",
 		Method:       http.MethodPost,
 		Path:         "/beta/litellm_basic_guardrail_api",
-		Summary:      "Run the configured LiteLLM guardrail",
-		Description:  "Executes the configured guardrail for the LiteLLM-compatible scan endpoint.",
-		Tags:         []string{"scan", "beta"},
-		Errors:       []int{http.StatusBadRequest, http.StatusBadGateway, http.StatusInternalServerError},
+		Summary:      "Run a policy for LiteLLM",
+		Description: "Evaluates additional_provider_specific_params.policy, or the configured default policy when that key is absent. " +
+			"Unknown or invalid policy selections return 400.",
+		Tags:   []string{"scan", "beta"},
+		Errors: []int{http.StatusBadRequest, http.StatusBadGateway},
 	}, h.handleLiteLLM)
 }
+
+const policyRoute = "/v1/guardrails/{policy}"
 
 func (h *Handler) registerMethodFallbacks(mux *http.ServeMux) {
 	methodFallbacks := []string{
 		h.path("/health/"),
-		h.path("/scan/secrets"),
-		h.path("/scan/pii"),
-		h.path("/scan/prompt-injection"),
+		h.path(policyRoute),
 		h.path("/beta/litellm_basic_guardrail_api"),
+	}
+	for _, route := range h.scan {
+		methodFallbacks = append(methodFallbacks, h.path(route.path))
 	}
 
 	for _, route := range methodFallbacks {
@@ -99,24 +132,18 @@ func (h *Handler) registerMethodFallbacks(mux *http.ServeMux) {
 	}
 }
 
-func (h *Handler) registerGuardrailOperation(
-	api huma.API,
-	path string,
-	operationID string,
-	description string,
-	guardrail domain.Guardrail,
-) {
+func (h *Handler) registerScanOperation(api huma.API, route scanRoute) {
 	huma.Register(api, huma.Operation{
 		MaxBodyBytes: (1 << 20) + 1,
-		OperationID:  operationID,
+		OperationID:  route.operationID,
 		Method:       http.MethodPost,
-		Path:         path,
-		Summary:      guardrail.Name(),
-		Description:  description,
+		Path:         route.path,
+		Summary:      route.guardrail,
+		Description:  route.description,
 		Tags:         []string{"scan"},
 		Errors:       []int{http.StatusBadRequest, http.StatusBadGateway},
 	}, func(ctx context.Context, input *scanRequestInput) (*scanResponseOutput, error) {
-		return h.handleGuardrail(ctx, guardrail, input)
+		return h.handleScan(ctx, route, input)
 	})
 }
 
@@ -149,98 +176,97 @@ func (h *Handler) handleHealth(ctx context.Context, _ *struct{}) (*healthRespons
 	return response, nil
 }
 
-func (h *Handler) handleGuardrail(
-	ctx context.Context,
-	guardrail domain.Guardrail,
-	input *scanRequestInput,
-) (*scanResponseOutput, error) {
+func (h *Handler) handleScan(ctx context.Context, route scanRoute, input *scanRequestInput) (*scanResponseOutput, error) {
 	request := input.Body.toDomain()
 	recordInputType(ctx, request)
-	setGuardrail(ctx, guardrail.Name())
+	setGuardrail(ctx, route.guardrail)
 
 	if err := validateRequest(request); err != nil {
 		return nil, err
 	}
-	if !guardrail.Supports(request.InputType) {
-		return nil, newStatusDetailError(
-			http.StatusBadRequest,
-			fmt.Sprintf("Guardrail '%s' does not support scope '%s'", guardrail.Name(), request.InputType),
-		)
-	}
-
-	response, err := h.applyChain(ctx, request, guardrail)
+	evaluation, err := h.evaluate(ctx, route.policy, request)
 	if err != nil {
-		return nil, h.handleGuardrailExecutionError(ctx, guardrail.Name(), err)
+		return nil, err
 	}
+	if evaluation.LimitExceeded {
+		setGuardrail(ctx, limitsGuardrail)
+	}
+	return newScanResponseOutput(route, evaluation), nil
+}
 
-	recordResponse(ctx, request, response)
-	return newScanResponseOutput(response), nil
+func (h *Handler) handlePolicy(ctx context.Context, input *policyRequestInput) (*policyResponseOutput, error) {
+	request := domain.Request{Texts: input.Body.Texts, InputType: input.Body.InputType, RequestData: input.Body.RequestData}
+	if request.InputType == "" {
+		request.InputType = domain.ScopeRequest
+	}
+	recordInputType(ctx, request)
+
+	selected, err := h.lookupPolicy(ctx, input.Policy, http.StatusNotFound)
+	if err != nil {
+		return nil, err
+	}
+	evaluation, err := h.evaluate(ctx, selected, request)
+	if err != nil {
+		return nil, err
+	}
+	return newPolicyResponseOutput(evaluation), nil
 }
 
 func (h *Handler) handleLiteLLM(ctx context.Context, input *liteLLMRequestInput) (*liteLLMResponseOutput, error) {
 	request := input.Body.toDomain()
 	recordInputType(ctx, request)
 
-	guardrailName := h.config.LiteLLMGuardrailName
-	setGuardrail(ctx, guardrailName)
-
 	if err := validateRequest(request); err != nil {
 		return nil, err
 	}
-	guardrail, exists := h.registry.Get(guardrailName)
-	if !exists {
-		return nil, newStatusDetailError(
-			http.StatusInternalServerError,
-			fmt.Sprintf("Unknown guardrail configured for LiteLLM: %s", guardrailName),
-		)
+	name := h.config.LiteLLMDefaultPolicy
+	if raw, present := input.Body.AdditionalProviderSpecificParams["policy"]; present {
+		selected, ok := raw.(string)
+		if !ok || selected == "" {
+			return nil, newStatusDetailError(http.StatusBadRequest, "additional_provider_specific_params.policy must be a non-empty policy name.")
+		}
+		name = selected
 	}
-
-	if !guardrail.Supports(request.InputType) {
-		return nil, newStatusDetailError(
-			http.StatusBadRequest,
-			fmt.Sprintf("Guardrail '%s' does not support scope '%s'", guardrailName, request.InputType),
-		)
-	}
-
-	response, err := h.applyChain(ctx, request, guardrail)
+	selected, err := h.lookupPolicy(ctx, name, http.StatusBadRequest)
 	if err != nil {
-		return nil, h.handleGuardrailExecutionError(ctx, guardrailName, err)
+		return nil, err
+	}
+	evaluation, err := h.evaluate(ctx, selected, request)
+	if err != nil {
+		return nil, err
 	}
 
-	recordResponse(ctx, request, response)
-	if len(response.Texts) != len(request.Texts) {
-		return nil, newStatusDetailError(http.StatusBadGateway, "Guardrail returned misaligned texts.")
+	response := liteLLMResponseBody{Action: evaluation.Decision, Texts: evaluation.Texts}
+	if evaluation.Decision == domain.DecisionBlocked {
+		response.BlockedReason = evaluation.Reason
 	}
-	return &liteLLMResponseOutput{Body: liteLLMResponseBody{
-		Action: response.Decision, BlockedReason: response.Reason, Texts: response.Texts,
-	}}, nil
+	return &liteLLMResponseOutput{Body: response}, nil
 }
 
-func (h *Handler) applyChain(ctx context.Context, request domain.Request, endpointGuardrail domain.Guardrail) (domain.Response, error) {
-	payload := domain.Payload{
-		Texts: request.Texts,
-		Scope: request.InputType,
+// lookupPolicy never falls back to another policy. Only syntactically valid
+// names are echoed, so error details and logs cannot carry arbitrary input.
+func (h *Handler) lookupPolicy(ctx context.Context, name string, status int) (*policy.Policy, error) {
+	if selected, ok := h.catalog.Get(name); ok {
+		setPolicy(ctx, selected.Name)
+		return selected, nil
 	}
+	if !policy.ValidName(name) {
+		return nil, newStatusDetailError(status, "Unknown policy.")
+	}
+	return nil, newStatusDetailError(status, fmt.Sprintf("Unknown policy '%s'.", name))
+}
 
-	sizeResult, err := h.maxLength.Apply(ctx, payload)
+func (h *Handler) evaluate(ctx context.Context, selected *policy.Policy, request domain.Request) (policy.Evaluation, error) {
+	stage, ok := domain.StageForScope(request.InputType)
+	if !ok {
+		return policy.Evaluation{}, newStatusDetailError(http.StatusBadRequest, "Invalid input_type. Expected 'request' or 'response'.")
+	}
+	evaluation, err := h.engine.Evaluate(ctx, selected, stage, request.Texts)
 	if err != nil {
-		return domain.Response{}, err
+		return policy.Evaluation{}, h.handleGuardrailExecutionError(ctx, err)
 	}
-	if sizeResult.Decision == domain.DecisionBlocked {
-		return guardrails.ResponseFromResult(h.maxLength.Name(), request.Texts, sizeResult), nil
-	}
-
-	result, err := endpointGuardrail.Apply(ctx, payload)
-	if err != nil {
-		return domain.Response{}, err
-	}
-	response := guardrails.ResponseFromResult(endpointGuardrail.Name(), request.Texts, result)
-	if len(result.Metadata) > 0 {
-		for key, value := range result.Metadata {
-			response.Metadata[key] = value
-		}
-	}
-	return response, nil
+	recordEvaluation(ctx, evaluation)
+	return evaluation, nil
 }
 
 func (h *Handler) logRequest(ctx context.Context, requestMetadata *observability.RequestContext, duration time.Duration) {
@@ -258,11 +284,16 @@ func (h *Handler) logRequest(ctx context.Context, requestMetadata *observability
 	h.logger.LogAttrs(ctx, level, message, requestMetadata.Attrs(duration)...)
 }
 
-func (h *Handler) handleGuardrailExecutionError(ctx context.Context, guardrailName string, err error) error {
+func (h *Handler) handleGuardrailExecutionError(ctx context.Context, err error) error {
+	detector := "unknown"
+	var detectorErr *policy.DetectorError
+	if errors.As(err, &detectorErr) {
+		detector = detectorErr.Detector
+	}
 	h.logger.ErrorContext(
 		ctx,
 		"guardrail execution failed",
-		"guardrail", guardrailName,
+		"detector", detector,
 		"error", err,
 	)
 
@@ -286,17 +317,22 @@ func setGuardrail(ctx context.Context, name string) {
 	requestMetadata.Guardrail = name
 }
 
-func recordResponse(ctx context.Context, payload domain.Request, response domain.Response) {
+func setPolicy(ctx context.Context, name string) {
 	requestMetadata, ok := observability.GetRequestContext(ctx)
 	if !ok {
 		return
 	}
-	requestMetadata.InputType = string(payload.InputType)
-	requestMetadata.Decision = string(response.Decision)
-	requestMetadata.TextCount = len(payload.Texts)
-	if guardrailName, ok := response.Metadata["guardrail"].(string); ok {
-		requestMetadata.Guardrail = guardrailName
+	requestMetadata.Policy = name
+}
+
+// recordEvaluation logs counts only: findings, texts and matched values never reach logs.
+func recordEvaluation(ctx context.Context, evaluation policy.Evaluation) {
+	requestMetadata, ok := observability.GetRequestContext(ctx)
+	if !ok {
+		return
 	}
+	requestMetadata.Decision = string(evaluation.Decision)
+	requestMetadata.FindingCount = len(evaluation.Findings)
 }
 
 func recordError(ctx context.Context, detail string) {

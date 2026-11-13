@@ -1,11 +1,16 @@
 patterns:
   - name: email
+    type: EMAIL
     regex: '(?P<secret>\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}\b)'
   - name: phone-fr
+    type: PHONE_NUMBER
     regex: '(?P<secret>(?:\+33\s?[1-9](?:[\s.-]?\d{2}){4}|0[1-9](?:[\s.-]?\d{2}){4}))'
   - name: iban
+    type: IBAN
     regex: '(?P<secret>\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b)'
   - name: ipv4
+    type: IP_ADDRESS
     regex: '(?P<secret>\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b)'
   - name: credit_card
+    type: CREDIT_CARD
     regex: '(?P<secret>\b(?:\d[ -]?){13,19}\b)'

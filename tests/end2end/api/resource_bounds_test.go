@@ -22,7 +22,7 @@ func TestRealHTTPBodyBoundary(t *testing.T) {
 	}
 	srv := httptest.NewServer(h)
 	defer srv.Close()
-	for _, path := range []string{"/scan/secrets", "/beta/litellm_basic_guardrail_api"} {
+	for _, path := range []string{"/scan/secrets", "/v1/guardrails/default", "/beta/litellm_basic_guardrail_api"} {
 		for _, unknown := range []bool{false, true} {
 			for _, size := range []int{1048575, 1048576, 1048577} {
 				payload := `{"texts":["ok"],"input_type":"request"}`

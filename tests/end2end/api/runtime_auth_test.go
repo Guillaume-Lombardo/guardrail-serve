@@ -32,6 +32,11 @@ func TestRuntimeAuthAndBodyLimits(t *testing.T) {
 		{name: "health-prefix", path: "/health/", status: 401},
 		{name: "docs", path: "/v1/docs", status: 401},
 		{name: "oversized", path: "/v1/scan/secrets", key: "first-key", body: strings.Repeat("x", 129), status: 413},
+		{name: "policy-missing", path: "/v1/v1/guardrails/default", status: 401},
+		{name: "policy-unknown-unauthenticated", path: "/v1/v1/guardrails/nope", status: 401},
+		{name: "policy-first", path: "/v1/v1/guardrails/default", key: "first-key", body: `{"texts":["é界🙂"]}`, status: 200},
+		{name: "policy-oversized", path: "/v1/v1/guardrails/default", key: "first-key", body: strings.Repeat("x", 129), status: 413},
+		{name: "litellm-policy-param-is-not-auth", path: "/v1/beta/litellm_basic_guardrail_api", body: `{"texts":["ok"],"additional_provider_specific_params":{"policy":"default","api_key":"first-key"},"request_headers":{"Authorization":"Bearer first-key"}}`, status: 401},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			method := http.MethodPost
