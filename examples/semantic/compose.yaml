@@ -1,0 +1,26 @@
+# Requires an operator-built compatible classifier image; see README.
+services:
+  guardrail:
+    build:
+      context: ../..
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      SEMANTIC_ENABLED: "true"
+      SEMANTIC_URL: http://classifier:8080/classify
+      SEMANTIC_FORMAT: scores
+      SEMANTIC_TIMEOUT: 2s
+      SEMANTIC_THRESHOLD: "0.9"
+      SEMANTIC_FAILURE_MODE: closed
+      GUARDRAILS_CONFIG_DIR: /policies
+      LITELLM_DEFAULT_POLICY: semantic
+    volumes:
+      - ./policies:/policies:ro
+    depends_on:
+      - classifier
+  classifier:
+    # Must implement POST :8080/classify {texts:[...]} -> {scores:[...]}.
+    # No default image: stock TEI does not document mDeBERTa support.
+    image: ${SEMANTIC_SIDECAR_IMAGE:?Set a compatible classifier image with an immutable digest}
+    expose:
+      - "8080"

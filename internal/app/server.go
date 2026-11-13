@@ -82,6 +82,18 @@ func NewHandlerWithRegistry(cfg config.Config, logger *slog.Logger, registry *pr
 	}
 	detectors := map[string]domain.Detector{secret.Name(): secret, pii.Name(): pii, prompt.Name(): prompt}
 
+	classifier, err := cfg.Semantic.NewClassifier()
+	if err != nil {
+		return nil, fmt.Errorf("semantic detector configuration: %w", err)
+	}
+	if classifier != nil {
+		detector, err := guardrails.NewSemanticPolicyDetector(classifier, logger)
+		if err != nil {
+			return nil, err
+		}
+		detectors[detector.Name()] = detector
+	}
+
 	defaultMask := policy.LiteralMask(cfg.SecretMask)
 	content, source, err := resources.LoadPolicies(cfg.GuardrailsConfigDir)
 	if err != nil {

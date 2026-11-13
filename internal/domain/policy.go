@@ -79,8 +79,9 @@ type Detection struct {
 	Score *float64
 }
 
-// Detector finds spans in a single text item. Implementations must be
-// deterministic and must not depend on transport or provider types.
+// Detector finds spans in a single text item. Implementations must respect
+// cancellation and must not expose transport or provider types in this contract.
+// Deterministic detectors remain deterministic; optional classifiers may use I/O.
 type Detector interface {
 	Name() string
 	Supports(Stage) bool

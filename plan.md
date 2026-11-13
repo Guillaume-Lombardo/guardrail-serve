@@ -385,3 +385,17 @@ Evidence and regression coverage:
 - Exact 502 regression assertions pass on the existing implementation; they
   were not failing runtime tests before this documentation correction.
 - No new architecture decision or environment/configuration contract.
+
+## L6b — Optional semantic policy adapter
+
+Validated scope: reuse L6a HTTP classifier behind a per-text domain detector,
+optional static operator configuration, explicit input/output policy chains,
+whole-original-text findings and fixed safe explanations. No changes to L4b,
+L5b, evaluation CLI/fixtures or default policies. No external model execution.
+
+Implementation: app-only composition, strict config validation without I/O,
+disabled detector startup rejection, safe fail-open structured warning and
+unchanged fail-closed 502/LiteLLM contracts. Preserve L8b observer and runtime auth.
+ADR 0016, env template and local env synchronized; optional Compose wiring
+requires an operator-supplied compatible sidecar (stock TEI mDeBERTa unverified).
+Validation and independent review evidence recorded in the delivery PR.
