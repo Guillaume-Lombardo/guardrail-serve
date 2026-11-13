@@ -1,8 +1,10 @@
 version: 1
 policies:
   # Recommended: the deterministic detector blocks, the semantic detector only
-  # annotates. The default English model produces many false positives on French
-  # text and on texts containing credentials (deploy/semantic-sidecar/EVALUATION.md).
+  # annotates. With the default Llama Prompt Guard 2 86M the false-positive rate on
+  # French injection-style negatives was 16.1% when combined with the deterministic
+  # detector (threshold 0.9), above the 5% bar for blocking; the previous DeBERTa
+  # default flagged most of them (deploy/semantic-sidecar/EVALUATION.md).
   - name: semantic
     mode: enforce
     stages:
@@ -17,7 +19,8 @@ policies:
         - detector: semantic_prompt_injection
           action: annotate
   # Explicit opt-in: the semantic detector blocks too. Expect false positives on
-  # French input and on texts with secrets or PII. In enforce mode, within one
+  # French input (about 1 in 6 negatives of the French injection corpus with the 86M
+  # model) and, with other models, on texts with secrets or PII. In enforce mode, within one
   # evaluated stage (input and output are evaluated separately) and whatever the
   # order of the steps, a semantic block takes precedence over a secret mask, so
   # such texts are refused, not redacted.

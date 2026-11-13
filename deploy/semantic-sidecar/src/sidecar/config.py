@@ -7,11 +7,13 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
-# Default model: ProtectAI deberta-v3-base-prompt-injection-v2 (Apache-2.0, not gated).
-# The revision is the commit of the model repository, not a mutable branch.
-DEFAULT_MODEL_ID = "protectai/deberta-v3-base-prompt-injection-v2"
-DEFAULT_MODEL_REVISION = "90c9989b1a342275dd0d1a95aad283c04e075671"
-DEFAULT_MALICIOUS_LABELS = ("INJECTION",)
+# Default model: Llama Prompt Guard 2 86M (Llama 4 Community License, gated, multilingual
+# mDeBERTa base). The revision is the commit of the model repository, not a mutable branch.
+# The checkpoint ships no id2label, so transformers names its two classes LABEL_0 and
+# LABEL_1; LABEL_1 is the malicious class (checked on the real model, see ADR 0020).
+DEFAULT_MODEL_ID = "meta-llama/Llama-Prompt-Guard-2-86M"
+DEFAULT_MODEL_REVISION = "a8ded8e697ce7c355e395a0df51f94adb4a2fd27"
+DEFAULT_MALICIOUS_LABELS = ("LABEL_1",)
 
 _HEX40 = frozenset("0123456789abcdef")
 
@@ -28,6 +30,7 @@ class Config:
     model_revision: str
     model_path: str
     malicious_labels: tuple[str, ...]
+    verify_labels: bool
     max_body_bytes: int
     max_texts: int
     max_tokens: int
@@ -70,6 +73,16 @@ class Config:
                 raise ConfigError(f"{name} must be in (0, 600]")
             return value
 
+        def boolean(name: str, default: bool) -> bool:
+            raw = env.get(name, "").strip().lower()
+            if not raw:
+                return default
+            if raw in ("true", "1"):
+                return True
+            if raw in ("false", "0"):
+                return False
+            raise ConfigError(f"{name} must be true or false")
+
         model_id = text("SIDECAR_MODEL_ID", DEFAULT_MODEL_ID)
         model_path = text("SIDECAR_MODEL_PATH", "")
         is_default = model_id == DEFAULT_MODEL_ID
@@ -96,6 +109,7 @@ class Config:
             model_revision=revision,
             model_path=model_path,
             malicious_labels=labels,
+            verify_labels=boolean("SIDECAR_VERIFY_LABELS", True),
             max_body_bytes=integer("SIDECAR_MAX_BODY_BYTES", 1 << 20, 1024, 64 << 20),
             max_texts=integer("SIDECAR_MAX_TEXTS", 32, 1, 1024),
             max_tokens=integer("SIDECAR_MAX_TOKENS", 512, 8, 8192),

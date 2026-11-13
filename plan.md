@@ -512,3 +512,60 @@ the orchestrator.
 - [ ] `integration_pending`: targeted Docker retest of the sidecar graceful stop on the
   final head (orchestrator, `codex-dev`).
 - [ ] PR CI and review of the final head: handed to the orchestrator.
+
+## L11 — Llama Prompt Guard 2 as the sidecar default (validated)
+
+- Status: delivered, PR open, review pending (13/11/2026). Branch `feat/prompt-guard-2`, base `main` at `a5e1157`.
+- Objective: replace the English-only DeBERTa default of the semantic sidecar
+  with `meta-llama/Llama-Prompt-Guard-2-86M` (multilingual mDeBERTa base), keep
+  the 22M checkpoint as a configuration option and DeBERTa as a retained
+  fallback, and measure the real gain (or loss) on the French and global
+  corpora with the same protocol as the L10 DeBERTa evaluation.
+- Scope: `deploy/semantic-sidecar/**` (Dockerfile, Compose, env template,
+  config, backend, tests, README, EVALUATION), `tests/integration/semantic_sidecar/**`,
+  root `README.md` semantic sections, `.env.template` comments, ADR 0020, `NOTICE`,
+  this plan. Out of scope: Go domain code, detectors, corpora, baselines, labels,
+  the `scores` contract, shutdown/hardening behavior from L10 (preserved).
+- Constraints:
+  - Gated model access uses only the existing Hugging Face credential through
+    `op-agent read` in process memory. It never appears in output, logs,
+    command lines, repository files, image layers or reports. Build-time auth
+    is a BuildKit secret only; runtime is offline with weights baked in.
+  - Pinned full commit hashes and verified `model.safetensors` sha256 for both
+    checkpoints; no `trust_remote_code`; safetensors only.
+  - Label mapping is explicit and verified against each checkpoint's
+    `id2label`; the score is the probability mass of the declared malicious
+    labels (jailbreak and injection classes if the checkpoint has three).
+  - Licensing: the effective license text of each checkpoint is read from the
+    repository at the pinned revision (not assumed); ADR 0020 and `NOTICE`
+    record attribution and distribution obligations (weights baked into an
+    image, "Built with Llama" where required). No public image is pushed.
+  - Offline tests only in CI; real-model checks sit behind the `realsidecar`
+    tag and run on `codex-dev` through `heavy`, Docker only there, one
+    project, loopback ports, no shared resources touched.
+  - Never record a failure or error as a true positive; never pool corpora;
+    never retune thresholds on the test corpora; never change labels or baselines.
+- Acceptance criteria:
+  1. Default model, revision, labels, hash, Compose, env template, download pin,
+     test helper and READMEs all reflect Prompt Guard 2 86M; the 22M option is
+     documented and its hash is pinned only if it was really downloaded.
+  2. Offline Python and Go suites pass without network; a fake backend with
+     3-class and 2-class `id2label` covers the label mapping.
+  3. Failing-first tests for each behavior change (labels, defaults, build
+     contract, docs/env synchronization).
+  4. Evaluation on `codex-dev` with the real 86M and DeBERTa under the same
+     protocol: French corpus (62 cases) and original corpus (83 cases) reported
+     separately with FR/EN/global splits, TP/FP/TN/FN, recall/FPR, end-to-end
+     p50/p95, n, warmup, CPU, threads, model revision, threshold and errors.
+  5. Recommended mode stays `annotate` unless FR FPR <= 5% and recall does not
+     drop below 29/31 on the new French corpus and 6/6 on the original French
+     cases (global FP also reported). The default model is 86M in either case.
+  6. Docs state thresholds, prompts, license limits and measured claims only.
+- Delivery: one PR (budget two including a fix), no merge by this agent; the
+  orchestrator runs the independent cross review after the gated merge.
+- Outcome (13/11/2026): the 86M model is the default; the 22M and DeBERTa profiles
+  ship with pinned revisions and hashes. Evaluation at threshold 0.9: French
+  injection corpus combined 30/5/26/1 (recall 96.8%, FPR 16.1%), original corpus
+  identical to the deterministic detector (13/1/69/0); DeBERTa reproduces the L10
+  counts. FPR 16.1% > 5%, so the examples stay in `annotate`. See ADR 0020 and
+  `deploy/semantic-sidecar/EVALUATION.md`.
