@@ -1,0 +1,35 @@
+name: Container
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check Go toolchain consistency
+        run: |
+          go_mod="$(awk '/^go /{print $2}' go.mod)"
+          grep -Eq "^FROM golang:${go_mod}(\.[0-9]+)?-" Dockerfile || {
+            echo "Dockerfile build image does not match go.mod go ${go_mod}" >&2
+            exit 1
+          }
+
+      - name: Build image (no push)
+        run: docker build --pull --tag guardrail-serve:ci .
