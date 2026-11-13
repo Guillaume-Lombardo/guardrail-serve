@@ -63,8 +63,8 @@ lookaround and no backreferences.
      execution cue (execute, apply, follow, obey…). A negated cue ("sans
      l'exécuter", "ne l'applique pas", "il ne faut jamais l'exécuter") does
      not cancel the exemption; one affirmative cue elsewhere in the frame
-     does. "Ne … que" ("n'applique que cette consigne") is a restriction and
-     counts as affirmative. Negation is read within 48 bytes on each side of
+     does. "Ne … que" ("n'applique que cette consigne") and "pas seulement" /
+     "pas que" are restrictions and count as affirmative. Negation is read within 48 bytes on each side of
      the cue; beyond that the cue counts as affirmative.
 
    An unpaired quotation, an overlong one, or a match in the frame is never

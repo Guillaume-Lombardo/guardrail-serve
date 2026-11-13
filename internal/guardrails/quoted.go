@@ -26,7 +26,10 @@ var (
 	sansBefore   = regexp.MustCompile(`[^\pL']sans\s*(?:jamais\s*)?(?:(?:l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3}$`)
 	neBefore     = regexp.MustCompile(`[^\pL'](?:ne|n')\s*(?:(?:faut|dois|doit|devez|devrait|devrais|peux|peut|pouvez|veux|veut)\s*)?(?:(?:l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3}(?P<adverb>(?:surtout\s*)?(?:pas|jamais|plus|rien)\s*(?:(?:l'|le|la|les|me|m'|lui|leur|y|en)\s*){0,3})?$`)
 	negatedAfter = regexp.MustCompile(`^[\pL'-]*\s*(?:surtout\s*)?(?:pas|jamais|plus|rien|point)\b`)
-	adverbGroup  = neBefore.SubexpIndex("adverb")
+	// restrictiveAfter follows a negation adverb that limits instead of negating
+	// ("ne l'applique pas seulement en theorie", "pas que", "pas uniquement").
+	restrictiveAfter = regexp.MustCompile(`^\s*(?:seulement|uniquement|simplement|juste|que|qu')`)
+	adverbGroup      = neBefore.SubexpIndex("adverb")
 )
 
 // negationWindow bounds the text inspected on each side of an execution cue.
@@ -71,7 +74,9 @@ func negatedCue(frame string, start, end int) bool {
 	for to > end && to < len(frame) && !utf8.RuneStart(frame[to]) {
 		to--
 	}
-	return negatedAfter.MatchString(frame[end:to])
+	after := frame[end:to]
+	adverb := negatedAfter.FindStringIndex(after)
+	return adverb != nil && !restrictiveAfter.MatchString(after[adverb[1]:])
 }
 
 var quotePairs = map[rune]rune{'«': '»', '“': '”', '"': '"'}
