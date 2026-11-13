@@ -1,0 +1,11 @@
+# Override for gated models: docker compose -f compose.yaml -f compose.gated.yaml build
+# Requires HF_TOKEN in the build shell (access granted to the gated repository).
+services:
+  semantic-sidecar:
+    build:
+      secrets:
+        - hf_token
+
+secrets:
+  hf_token:
+    environment: HF_TOKEN
