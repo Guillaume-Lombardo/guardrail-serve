@@ -47,12 +47,12 @@ func newError(kind FailureKind) *Error { return &Error{Kind: kind} }
 // toFailure maps an error raised while calling the sidecar to an *Error.
 // parent is the caller's context, call the context carrying the client timeout.
 func toFailure(parent, call context.Context, err error) *Error {
+	if parentErr := parent.Err(); parentErr != nil {
+		return &Error{Kind: FailureCanceled, cause: parentErr}
+	}
 	var known *Error
 	if errors.As(err, &known) {
 		return known
-	}
-	if parentErr := parent.Err(); parentErr != nil {
-		return &Error{Kind: FailureCanceled, cause: parentErr}
 	}
 	if call.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
 		return &Error{Kind: FailureTimeout, cause: context.DeadlineExceeded}

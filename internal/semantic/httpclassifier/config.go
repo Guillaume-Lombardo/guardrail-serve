@@ -66,8 +66,9 @@ const (
 	// DefaultMaxResponseBytes bounds how much of a response body is read.
 	DefaultMaxResponseBytes int64 = 1 << 20
 	// DefaultChunkRunes is the largest chunk, in runes. Prompt Guard 2 has a
-	// 512-token window and two of those tokens are special tokens; assuming
-	// at most one token per rune keeps every chunk inside the window.
+	// 512-token window and two of those tokens are special tokens; this
+	// assumes about one token per rune at most, a heuristic (no tokenizer is
+	// available) that leaves a wide margin for ordinary text.
 	DefaultChunkRunes = 510
 	// DefaultChunkOverlapRunes is the overlap between consecutive chunks.
 	DefaultChunkOverlapRunes = 64
@@ -137,10 +138,12 @@ func (c Config) resolve() (settings, error) {
 	if err != nil {
 		return settings{}, err
 	}
-	if _, err := ParseFormat(string(c.Format)); err != nil {
+	format, err := ParseFormat(string(c.Format))
+	if err != nil {
 		return settings{}, err
 	}
-	if _, err := ParseFailureMode(string(c.FailureMode)); err != nil {
+	failureMode, err := ParseFailureMode(string(c.FailureMode))
+	if err != nil {
 		return settings{}, err
 	}
 	if math.IsNaN(c.Threshold) || c.Threshold <= 0 || c.Threshold > 1 {
@@ -152,10 +155,10 @@ func (c Config) resolve() (settings, error) {
 
 	resolved := settings{
 		endpoint:     endpoint,
-		format:       c.Format,
+		format:       format,
 		threshold:    c.Threshold,
 		timeout:      c.Timeout,
-		failureMode:  c.FailureMode,
+		failureMode:  failureMode,
 		modelName:    strings.TrimSpace(c.ModelName),
 		maxResponse:  c.MaxResponseBytes,
 		chunkRunes:   c.ChunkRunes,

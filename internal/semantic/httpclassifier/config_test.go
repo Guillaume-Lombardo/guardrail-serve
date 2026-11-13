@@ -117,3 +117,15 @@ func TestDefaultOverlapShrinksWithSmallChunks(t *testing.T) {
 		t.Fatalf("overlap = %d, want 10", classifier.cfg.overlapRunes)
 	}
 }
+
+func TestNewUsesNormalizedEnumValues(t *testing.T) {
+	cfg := validConfig()
+	cfg.FailureMode, cfg.Format = " open ", " tei_predict "
+	classifier, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if classifier.cfg.failureMode != FailOpen || classifier.cfg.format != FormatTEIPredict {
+		t.Fatalf("enum values were not normalized: %+v", classifier.cfg)
+	}
+}

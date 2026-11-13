@@ -108,10 +108,14 @@ the highest of them wins.
 
 Prompt Guard 2 has a 512-token context window and the model card tells
 callers to split longer inputs and scan the segments. The package has no
-tokenizer, so it estimates conservatively: **at most one token per rune**, and
-two tokens are reserved for the special tokens. A chunk of at most 510 runes
-therefore stays inside the window for any text; for English prose it uses
-roughly a quarter of it, which costs extra calls but never leaves a gap.
+tokenizer, so it uses a conservative **heuristic**: about one token per rune
+at most, with two tokens reserved for the special tokens, hence chunks of at
+most 510 runes. For ordinary text this stays well inside the window (English
+prose uses roughly a quarter of it), which costs extra calls but leaves no
+gap. It is not a guarantee: the exact tokenizer and its normalization are not
+available here and unusual input could expand beyond one token per rune.
+Overflows are never hidden: the sidecar rejects over-long inputs
+(`truncate: false` with TEI) and the failure surfaces as a `status` error.
 
 - Texts are split on rune boundaries (never inside a UTF-8 sequence; invalid
   bytes become U+FFFD). Boundaries prefer a position after whitespace within
@@ -127,8 +131,6 @@ roughly a quarter of it, which costs extra calls but never leaves a gap.
   the reported score is the true maximum rather than a partial one.
 - Input needing more than `MaxChunks` chunks fails with `too_many_chunks`.
   It is never truncated and nothing is sent.
-- The estimate is the only protection against over-long inputs on the client
-  side; if the sidecar still rejects one, that surfaces as a `status` failure.
 
 ## Assessment
 

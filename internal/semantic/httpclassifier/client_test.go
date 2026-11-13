@@ -674,3 +674,27 @@ func TestConcurrentDetections(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestCancelledContextIsAnErrorForEveryInput(t *testing.T) {
+	var calls atomic.Int32
+	server := newServer(t, func(http.ResponseWriter, *http.Request) { calls.Add(1) })
+	classifier := newClassifier(t, server.URL, func(c *Config) {
+		c.FailureMode, c.ChunkRunes, c.MaxChunks = FailOpen, 64, 1
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for name, texts := range map[string][]string{
+		"empty":           nil,
+		"blank":           {" "},
+		"too many chunks": {strings.Repeat("x", 1000)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := classifier.DetectPromptInjection(ctx, texts)
+			assertKind(t, err, FailureCanceled)
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatal("a cancelled context must not reach the sidecar")
+	}
+}

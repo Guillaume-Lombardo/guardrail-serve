@@ -55,6 +55,9 @@ func newHTTPClient() *http.Client {
 // sent. See the package README for failure semantics.
 func (c *Classifier) DetectPromptInjection(ctx context.Context, texts []string) (semantic.PromptInjectionAssessment, error) {
 	score, topIndex, chunks, err := c.score(ctx, texts)
+	if err == nil && ctx.Err() != nil {
+		err = &Error{Kind: FailureCanceled, cause: ctx.Err()}
+	}
 	if err != nil {
 		return c.fail(err)
 	}
@@ -99,6 +102,9 @@ func (c *Classifier) fail(failure *Error) (semantic.PromptInjectionAssessment, e
 }
 
 func (c *Classifier) score(ctx context.Context, texts []string) (score float64, topIndex, chunkCount int, failure *Error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, 0, &Error{Kind: FailureCanceled, cause: err}
+	}
 	chunks, ok := c.chunk(texts)
 	if !ok {
 		return 0, 0, 0, newError(FailureTooManyChunks)

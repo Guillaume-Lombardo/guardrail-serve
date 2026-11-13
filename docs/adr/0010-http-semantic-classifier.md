@@ -38,8 +38,9 @@ and environment variables follow in a separate change.
   (default `MALICIOUS`); a response row without such a label is an error.
   Contracts and sources are documented in the package README.
 - Texts are chunked into rune-aligned windows (default 510 runes, overlap 64)
-  under a conservative estimate of one token per rune, because no tokenizer is
-  available. Whitespace and combining-sequence aware boundaries reduce
+  under a conservative heuristic of about one token per rune, because no
+  tokenizer is available (not a guarantee; the sidecar rejects overflows
+  explicitly). Whitespace and combining-sequence aware boundaries reduce
   mid-word cuts; overlap guarantees that short phrases are not lost at
   boundaries; every rune is covered. The score is the maximum over all
   chunks and texts, and all chunks are scored. Inputs above a chunk budget
