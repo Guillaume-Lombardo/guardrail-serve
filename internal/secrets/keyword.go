@@ -44,14 +44,15 @@ const hspace = `[\t\p{Zs}]`
 // gitleaks generic rule) and the full-width ':' and '=', or
 // the prose connectors "is", "est", "was". Values are a quoted string, where
 // a backslash escapes the next character, an escaped-JSON string (`\"x\"`,
-// as in JSON embedded in a JSON string), or an unquoted run up to white
-// space or a delimiter. Keys may be closed by quotes, escaped quotes or ']'.
+// as in JSON embedded in a JSON string, where an inner quote is `\\\"` and
+// an inner backslash `\\\\`), or an unquoted run up to white space or a
+// delimiter. Keys may be closed by quotes, escaped quotes or ']'.
 var assignmentPattern = regexp.MustCompile(
 	`(?P<key>(?i:mot[ _-]?de[ _-]?passe)|[\pL\pN_.\-]{1,64})` +
 		"(?:\\\\?[\"'`\\]]){0,2}" +
 		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*` +
 		`|` + hspace + `+(?i:is|est|was)` + hspace + `+)` +
-		`(?P<value>\\"[^"\n]*?\\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|` + "`[^`\\n]*`" +
+		`(?P<value>\\"(?:[^"\\\n]|\\\\\\"|\\\\\\\\|\\\\[^"\\\n]|\\[^"\\\n])*\\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|` + "`[^`\\n]*`" +
 		`|[^\s\p{Zs}"'` + "`" + `,;&<>(){}\[\]]+)`)
 
 // urlCredentialPattern matches the password of URL user information
@@ -90,9 +91,17 @@ func findAssignments(view *textView) []assignment {
 // key is not a secret key may hide one in its value ("Here is password=x",
 // `note: "password=x"`): quoted values are searched again (each quote kind
 // ends a nesting level, so the depth is bounded) and unquoted values are
-// tokenized by nestedAssignment, keeping the whole scan linear.
+// tokenized by nestedAssignment. When such a value ends with a secret key
+// whose own value lies past the match ("Here is password = x",
+// `Here is password="x"`), the search resumes at that key; the key is at
+// most maxKeyRunes long, so the whole scan stays linear.
 func collectAssignments(text string, from, to int, found *[]assignment) {
-	for _, m := range assignmentPattern.FindAllStringSubmatchIndex(text[from:to], -1) {
+	for from < to {
+		m := assignmentPattern.FindStringSubmatchIndex(text[from:to])
+		if m == nil {
+			return
+		}
+		next := from + m[1]
 		key := text[from+m[2*assignKey] : from+m[2*assignKey+1]]
 		valueStart, valueEnd := from+m[2*assignValue], from+m[2*assignValue+1]
 		quoted := false
@@ -129,9 +138,39 @@ func collectAssignments(text string, from, to int, found *[]assignment) {
 		default:
 			if nested, ok := nestedAssignment(text, valueStart, valueEnd); ok {
 				*found = append(*found, nested)
+			} else if keyStart, ok := trailingSecretKey(text, valueStart, valueEnd); ok {
+				next = keyStart
 			}
 		}
+		from = next
 	}
+}
+
+// trailingSecretKey returns the start of the secret key that ends the
+// unquoted value text[start:end], possibly followed by operators
+// ("password" or "password="), so its own value can be matched. The key
+// starts inside the value, after the match start, so resuming progresses.
+func trailingSecretKey(text string, start, end int) (int, bool) {
+	for end > start {
+		r, size := utf8.DecodeLastRuneInString(text[start:end])
+		if !isOperatorRune(r) {
+			break
+		}
+		end -= size
+	}
+	keyStart := end
+	for n := 0; n < maxKeyRunes && keyStart > start; n++ {
+		r, size := utf8.DecodeLastRuneInString(text[start:keyStart])
+		if !isKeyRune(r) {
+			break
+		}
+		keyStart -= size
+	}
+	if keyStart == end {
+		return 0, false
+	}
+	group, _ := classifyKey(text[keyStart:end])
+	return keyStart, group != ""
 }
 
 func isComparison(op string) bool {
@@ -474,7 +513,9 @@ func classifyKey(key string) (string, bool) {
 			after = append(after, w.camel...)
 		}
 		if group, prefix := secretGroupAt(lowers, i); group != "" {
-			return keyVerdict(group, prefix, before, after, idLike)
+			// The keyword ends the word: every other camel sub-word of the
+			// word precedes it (getCsrfToken, myNextPageToken).
+			return keyVerdict(group, prefix, append(before, word.camel...), after, idLike)
 		}
 		if len(word.camel) < 2 {
 			continue

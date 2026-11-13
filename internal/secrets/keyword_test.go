@@ -167,6 +167,8 @@ func TestClassifyKey(t *testing.T) {
 		{"apiKeyValue", groupAPIKey, false},
 		{"accessTokenExpiry", "", false},
 		{"secretArn", "", false},
+		{"myNextPageToken", "", false},
+		{"getCsrfToken", "", false},
 	}
 	for _, tc := range cases {
 		group, idLike := classifyKey(tc.key)
@@ -232,6 +234,10 @@ func TestNestedSecretAssignments(t *testing.T) {
 		`{"msg": "the password is %s"}`,
 		"a=b=c=d=password=%s",
 		"see https://example.com/login?password=%s",
+		`Here is password="%s"`,
+		"Here is password = %s",
+		`Here is password = "%s"`,
+		`note: x=password="%s"`,
 	} {
 		text := strings.Replace(format, "%s", contextValue, 1)
 		start := strings.Index(text, contextValue)
@@ -252,6 +258,8 @@ func TestQuotedValuesHonourEscapes(t *testing.T) {
 		{`{"password":"abc\"def123"}`, `abc\"def123`},
 		{`{'password': 'it\'s9more'}`, `it\'s9more`},
 		{`{"password":"abc\\"}`, `abc\\`},
+		{`{"payload":"{\"password\":\"abc\\\"def123\"}"}`, `abc\\\"def123`},
+		{`{"payload":"{\"password\":\"abc\\\\\"}"}`, `abc\\\\`},
 	} {
 		start := strings.Index(tc.text, tc.value)
 		if findings := scan(t, scanner, tc.text); len(findings) != 1 || !hasFinding(findings, "keyword:password", start, start+len(tc.value)) {
