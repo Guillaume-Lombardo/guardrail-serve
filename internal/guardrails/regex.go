@@ -91,11 +91,6 @@ func newRegexDetector(name, defaultType, blockReason string, selector spanSelect
 	return &RegexDetector{name: name, blockReason: blockReason, rules: rules}, nil
 }
 
-// NewSecretDetector builds the contextual secret detector (detect_secret).
-func NewSecretDetector(patterns []NamedPattern) (*RegexDetector, error) {
-	return newRegexDetector("detect_secret", "SECRET", "Secret detected.", spanSecretGroup, patterns)
-}
-
 // NewPIIDetector builds the personal data detector (detect_pii).
 func NewPIIDetector(patterns []NamedPattern) (*RegexDetector, error) {
 	return newRegexDetector("detect_pii", "PII", "Personal data detected.", spanSecretGroup, patterns)

@@ -109,7 +109,7 @@ func TestInvalidUTF8JSONFailsClosed(t *testing.T) {
 		{"damaged_suffix", "safe\x80"},
 		{"unpaired_surrogate", `\ud800`},
 	} {
-		for _, path := range []string{"/v1/guardrails/default", "/scan/pii", "/scan/prompt-injection", "/beta/litellm_basic_guardrail_api"} {
+		for _, path := range []string{"/v1/guardrails/default", "/scan/secrets", "/v1/guardrails/detect_secret", "/scan/pii", "/scan/prompt-injection", "/beta/litellm_basic_guardrail_api"} {
 			t.Run(tc.name+path, func(t *testing.T) {
 				// A valid sensitive item before the damaged one must not leak partial results.
 				text := "alice@example.fr " + tc.text

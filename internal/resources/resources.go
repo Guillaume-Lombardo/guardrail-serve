@@ -32,6 +32,27 @@ func LoadPatterns(overrideDir, name string) ([]guardrails.NamedPattern, error) {
 	return file.Patterns, nil
 }
 
+// LoadSecretPatterns returns nil for the native scanner, or a non-nil list
+// replacing it when an explicit legacy YAML override exists (even if empty).
+func LoadSecretPatterns(overrideDir string) ([]guardrails.NamedPattern, error) {
+	if overrideDir == "" {
+		return nil, nil
+	}
+	path := filepath.Join(overrideDir, "detect_secret_contextual_patterns.yaml")
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read secret override: %w", err)
+	}
+	var file patternsFile
+	if err := yaml.Unmarshal(content, &file); err != nil {
+		return nil, fmt.Errorf("decode secret override: %w", err)
+	}
+	return append([]guardrails.NamedPattern{}, file.Patterns...), nil
+}
+
 // PolicyFileName is the policy catalog file, embedded or overridden as a whole.
 const PolicyFileName = "policies.yaml"
 

@@ -52,3 +52,29 @@ func TestLoadPoliciesReportsSource(t *testing.T) {
 		t.Fatalf("override: source=%q content=%q err=%v", source, content, err)
 	}
 }
+
+func TestSecretOverrideSelection(t *testing.T) {
+	dir := t.TempDir()
+	for _, path := range []string{"", dir} {
+		p, err := LoadSecretPatterns(path)
+		if err != nil || p != nil {
+			t.Fatal("missing override must select native")
+		}
+	}
+	path := filepath.Join(dir, "detect_secret_contextual_patterns.yaml")
+	for _, content := range []string{"patterns: []\n", "patterns: null\n", ""} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		p, err := LoadSecretPatterns(dir)
+		if err != nil || p == nil || len(p) != 0 {
+			t.Fatal("explicit empty override must replace native")
+		}
+	}
+	if err := os.WriteFile(path, []byte("patterns: ["), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSecretPatterns(dir); err == nil {
+		t.Fatal("invalid override accepted")
+	}
+}

@@ -69,8 +69,7 @@ func TestPolicyRouteDefaultPolicyInputAndOutput(t *testing.T) {
 	}
 	wantFindings := []finding{
 		{TextIndex: 0, Detector: "detect_pii", Type: "EMAIL", Rule: "email", Start: 20, End: 41, Action: "mask"},
-		{TextIndex: 1, Detector: "detect_secret", Type: "PASSWORD", Rule: "login_password", Start: 9, End: 15, Action: "mask"},
-		{TextIndex: 1, Detector: "detect_secret", Type: "PASSWORD", Rule: "password_assignment", Start: 9, End: 15, Action: "mask"},
+		{TextIndex: 1, Detector: "detect_secret", Type: "SECRET", Rule: "keyword:password", Start: 9, End: 15, Action: "mask"},
 		{TextIndex: 1, Detector: "detect_pii", Type: "IP_ADDRESS", Rule: "ipv4", Start: 20, End: 29, Action: "mask"},
 	}
 	if !reflect.DeepEqual(input.Findings, wantFindings) {
@@ -101,7 +100,7 @@ func TestPolicyRouteDetectModeReportsWithoutChanging(t *testing.T) {
 	if audit.Mode != "detect" || audit.Decision != "NONE" || audit.PolicyDecision != "BLOCKED" || audit.Reason == nil {
 		t.Fatalf("audit = %+v", audit)
 	}
-	if !reflect.DeepEqual(audit.Texts, texts) || len(audit.Findings) != 4 {
+	if !reflect.DeepEqual(audit.Texts, texts) || len(audit.Findings) != 3 {
 		t.Fatalf("audit texts = %q findings = %+v", audit.Texts, audit.Findings)
 	}
 }
@@ -195,7 +194,7 @@ func TestPolicyLogsCarryCountsNotValues(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
 		t.Fatal(err)
 	}
-	if entry["policy"] != "default" || entry["finding_count"] != float64(3) || entry["decision"] != "GUARDRAIL_INTERVENED" {
+	if entry["policy"] != "default" || entry["finding_count"] != float64(2) || entry["decision"] != "GUARDRAIL_INTERVENED" {
 		t.Fatalf("log entry = %v", entry)
 	}
 	if strings.Contains(logs.String(), "hunter2") || strings.Contains(logs.String(), "a@b.fr") {

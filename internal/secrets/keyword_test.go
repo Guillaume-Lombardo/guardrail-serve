@@ -382,3 +382,35 @@ func TestCodeReferencesAreNotSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestFrenchNestedLabelRegression(t *testing.T) {
+	s := mustScanner(t, keywordsOnly())
+	for _, text := range []string{"Voici l'accès demandé : mot de passe: demo-fr-123, valable une semaine.", "note: mot de passe: Tr0ub4dor9"} {
+		if fs := scan(t, s, text); len(fs) == 0 {
+			t.Fatal("nested French label lost")
+		}
+	}
+}
+
+// Paired cases pin the existing negation policy without adding speculative
+// heuristics: pagination/descriptors are public metadata; nearby passwords
+// and provider-specific names still hold credentials.
+func TestKeyNegationCorpus(t *testing.T) {
+	for _, tc := range []struct {
+		key    string
+		secret bool
+	}{
+		{"csrf_token", false}, {"public_api_key", false}, {"nextPageToken", false},
+		{"continuationToken", false}, {"passwordHint", false}, {"api_key_id", false},
+		{"adminPassword", true}, {"MinIOPassword", true}, {"nextPassword", true},
+		{"nextPagePassword", true}, {"private_api_key", true}, {"dbPassword", true},
+		{"mot de passe", true}, {"mdp", true}, {"passwordProd", true},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			group, _ := classifyKey(tc.key)
+			if (group != "") != tc.secret {
+				t.Fatalf("key classification mismatch")
+			}
+		})
+	}
+}

@@ -399,3 +399,31 @@ unchanged fail-closed 502/LiteLLM contracts. Preserve L8b observer and runtime a
 ADR 0016, env template and local env synchronized; optional Compose wiring
 requires an operator-supplied compatible sidecar (stock TEI mDeBERTa unverified).
 Validation and independent review evidence recorded in the delivery PR.
+
+## L5b — Native secret detector integration
+
+Validated scope: replace default secret regexes with internal/secrets.Scanner,
+normalize native input and project byte spans to original graphemes. Preserve
+explicit YAML overrides as complete legacy replacements, including empty lists.
+Keep policy, transport, auth, metrics and optional classifier contracts intact.
+Regression-first HTTP journeys cover hashes, UUIDs, URL segments, strong secret
+context, provider/entropy secrets and French zero-width text on both stages.
+Delivery gates: full suites, offline gate without weakened labels, vet, hooks,
+independent correctness and security reviews. Final phase delivery remains pending
+until this PR's CI and reviews complete; no merge is authorized in this run.
+
+- [x] L5b implementation and regression tests; legacy YAML override preserved.
+- [x] Old L7b gate passes unchanged: four secret false positives removed
+  (secret-en-105, secret-en-107, secret-fr-105, secret-fr-106), no lost true
+  positives. Secret precision 0.75 → 0.9375, recall 15/17 unchanged, FP 5 → 1.
+  Total known errors 17 → 13 observed; baseline and labels remain unchanged.
+- [x] Final phase implementation and local verification complete: gofmt, vet,
+  all tests, explicit integration/end-to-end, focused race and all hooks green.
+- [x] Independent correctness review: two rounds, APPROVE. Security review:
+  two passes, APPROVE. No open blocker/should. Reviewed runtime head: adfdffc.
+  S1 (copying empty defaults disabled secrets) fixed by deleting the unused
+  default secrets YAML, with a failing-first HTTP regression. S2 (native-only
+  invalid-text HTTP coverage) fixed with secrets routes and both LiteLLM stages.
+  Test/style nits fixed; nested secret labels remain a documented limitation.
+- [ ] Hosted PR CI completion; delivery remains open and unmerged until handoff.
+  No merge authorized in this run.
