@@ -151,7 +151,8 @@ so `adminPassword` and `MinIOPassword` are not negated by "min";
 `next`, `page` and `continuation` negate tokens only, so `nextPassword` is a
 password) or an identifier suffix
 (`api_key_id`, `client_id`). `Authorization` values skip the scheme (`Basic`,
-`Token`, `Bearer`…). A standalone `Bearer <credential>` of at least 16
+`Token`, `Bearer`…); a credential that is itself an assignment
+(`Basic password=x`, `Basic token="x"`) is reported by that assignment. A standalone `Bearer <credential>` of at least 16
 characters is also reported as `keyword:bearer`, and the password of URL
 user information (`scheme://user:password@host`) as
 `keyword:url_credential`, with the quoted value rules below.
@@ -182,7 +183,7 @@ An unquoted value is extended over the delimiters that cannot end a
 credential in free text (`password=Tr0ub4dor&3x`, `Xk9;vL7`), so masking does
 not leave its tail visible. The extension stops at white space, quotes, `<`,
 `>`, a delimiter that starts another `key=value` (`&next=`, `;user=`,
-`, user=`) and after 256 bytes; a trailing `,`, `;` or unbalanced closing
+`, user=`), the `](` of a Markdown link and after 256 bytes; a trailing `,`, `;` or unbalanced closing
 bracket is left out. A final sentence dot is trimmed from unquoted values.
 
 ### entropy
@@ -226,8 +227,10 @@ git SHA is still reported when it is assigned to a secret key.
   value) is not an assignment.
 - Labels that are not a single key are not keys: Markdown tables
   (`| Password | x |`), multi-word labels (`API key: x`) and sentences such
-  as `the password for admin is x`. Markdown bold labels (`**Password:** x`)
-  and `is:` are supported.
+  as `the password for admin is x`. Markdown emphasis labels (`**Password:** x`,
+  `*Password:* x`) and `is:` are supported; markers after the operator end
+  the label only when the key opens with as many, so `password=*x` keeps
+  its `*`.
 - An unquoted value immediately followed by `(` or `[` is read as a call or
   subscript and not reported (`password=Ab1(cdef`); a final `.` of an
   unquoted value is read as the end of the sentence and stays visible.

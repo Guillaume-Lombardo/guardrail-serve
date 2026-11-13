@@ -47,12 +47,13 @@ const hspace = `[\t\p{Zs}]`
 // as in JSON embedded in a JSON string, where an inner quote is `\\\"` and
 // an inner backslash `\\\\`), or an unquoted run up to white space or a
 // delimiter. Keys may be closed by quotes, escaped quotes, ']' or Markdown
-// bold markers (`**Password:** x`, `**Password**: x`), and "is:" is a
-// connector too ("my password is: x").
+// emphasis markers (`**Password:** x`, `**Password**: x`), and "is:" is a
+// connector too ("my password is: x"). Markers after the operator are only
+// the end of a label when the key opens with as many (see markdownValue).
 var assignmentPattern = regexp.MustCompile(
 	`(?P<key>(?i:mot[ _-]?de[ _-]?passe)|[\pL\pN_.\-]{1,64})` +
 		"(?:\\\\?[\"'`\\]]|\\*){0,2}" +
-		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*(?:\*{1,2}` + hspace + `*)?` +
+		`(?:` + hspace + `*(?P<op>:=|=>|={1,3}|!==?|:|>|\x{FF1A}|\x{FF1D})` + hspace + `*(?:(?P<mdclose>\*{1,2})` + hspace + `*)?` +
 		`|` + hspace + `+(?i:is|est|was)(?:` + hspace + `*:)?` + hspace + `+)` +
 		`(?P<value>\\"(?:[^"\\\n]|\\\\\\"|\\\\\\\\|\\\\[^"\\\n]|\\[^"\\\n])*\\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|` + "`[^`\\n]*`" +
 		`|[^\s\p{Zs}"'` + "`" + `,;&<>(){}\[\]]+)`)
@@ -70,6 +71,7 @@ var (
 	assignKey   = assignmentPattern.SubexpIndex("key")
 	assignOp    = assignmentPattern.SubexpIndex("op")
 	assignValue = assignmentPattern.SubexpIndex("value")
+	assignMD    = assignmentPattern.SubexpIndex("mdclose")
 )
 
 // assignment is one `key <op> value` occurrence, in byte offsets. The value
@@ -111,6 +113,9 @@ func collectAssignments(poll *ctxPoll, text string, from, to int, found *[]assig
 		next := from + m[1]
 		key := text[from+m[2*assignKey] : from+m[2*assignKey+1]]
 		valueStart, valueEnd := from+m[2*assignValue], from+m[2*assignValue+1]
+		if m[2*assignMD] >= 0 {
+			valueStart, valueEnd = markdownValue(text, from+m[2*assignKey], from+m[2*assignMD], from+m[2*assignMD+1], valueStart, valueEnd)
+		}
 		quoted := false
 		if strings.HasPrefix(text[valueStart:valueEnd], `\"`) && valueEnd-valueStart >= 4 {
 			quoted = true
@@ -136,8 +141,13 @@ func collectAssignments(poll *ctxPoll, text string, from, to int, found *[]assig
 		}
 		if group == groupAuthorization {
 			a = authorizationCredential(text, a)
-			// The credential after an unquoted scheme lies past the match.
-			next = max(next, min(a.valueEnd, to))
+			if a.valueStart >= next {
+				// The credential after an unquoted scheme lies past the
+				// match, and may itself be an assignment.
+				var resume int
+				a, resume = credentialAssignment(text, a)
+				next = max(next, min(resume, to))
+			}
 		}
 		*found = append(*found, a)
 		switch {
@@ -242,6 +252,36 @@ func nestedAssignment(text string, start, end int) (assignment, bool) {
 	return assignment{}, false
 }
 
+// credentialAssignment handles an Authorization credential read past its
+// scheme that holds an assignment: `Basic password=x` reports the nested
+// assignment, and `Basic token="x"` stops the credential before its secret
+// key so that the search resumes there. It returns where the search resumes.
+func credentialAssignment(text string, a assignment) (assignment, int) {
+	if nested, ok := nestedAssignment(text, a.valueStart, a.valueEnd); ok {
+		return nested, a.valueEnd
+	}
+	if keyStart, ok := trailingSecretKey(text, a.valueStart, a.valueEnd); ok {
+		a.valueEnd = keyStart
+		return a, keyStart
+	}
+	return a, a.valueEnd
+}
+
+// markdownValue returns the value span when Markdown emphasis markers follow
+// the operator, text[mdStart:mdEnd]. They end a label (`**Password:** x`)
+// only when the key opens with at least as many; otherwise they belong to
+// the value (`password=*x`), which then starts at mdStart when it follows
+// them directly and is the markers alone when white space separates them.
+func markdownValue(text string, keyStart, mdStart, mdEnd, valueStart, valueEnd int) (int, int) {
+	if strings.HasSuffix(text[:keyStart], text[mdStart:mdEnd]) {
+		return valueStart, valueEnd
+	}
+	if valueStart == mdEnd {
+		return mdStart, valueEnd
+	}
+	return mdStart, mdEnd
+}
+
 // authorizationSchemes are HTTP authentication schemes that precede the
 // credential in an Authorization value.
 var authorizationSchemes = map[string]bool{"bearer": true, "basic": true, "token": true, "digest": true, "negotiate": true, "apikey": true}
@@ -316,6 +356,9 @@ func scanKeywords(poll *ctxPoll, view *textView, assignments []assignment) ([]ra
 		}
 	}
 	for _, m := range urlCredentialPattern.FindAllStringSubmatchIndex(text, -1) {
+		if err := poll.check(); err != nil {
+			return nil, err
+		}
 		user, start, end := text[m[2]:m[3]], m[4], m[5]
 		if allDigits(text[start:end]) && (user == "" || strings.Contains(user, ".")) {
 			continue // host:port@... is not user information
@@ -325,6 +368,9 @@ func scanKeywords(poll *ctxPoll, view *textView, assignments []assignment) ([]ra
 		}
 	}
 	for _, m := range bearerPattern.FindAllStringSubmatchIndex(text, -1) {
+		if err := poll.check(); err != nil {
+			return nil, err
+		}
 		start, end := m[2], m[3]
 		if end-start >= minBearerLength && acceptKeywordValue(text, start, end, false, groupBearer) {
 			findings = append(findings, rawFinding{source: SourceKeyword, rule: keywordRulePrefix + groupBearer, kind: TypeSecret, start: start, end: end})
@@ -337,7 +383,8 @@ func scanKeywords(poll *ctxPoll, view *textView, assignments []assignment) ([]ra
 // end a credential in free text (`Tr0ub4dor&3x`, `Xk9;vL7`, `a)b`), so that
 // masking does not leave its tail visible. It stops at white space, quotes,
 // '<' and '>' (markup), at a delimiter that starts another `key=value`
-// (query strings, shell, argument lists) and after maxValueExtension bytes;
+// (query strings, shell, argument lists), at the "](" of a Markdown link and
+// after maxValueExtension bytes;
 // trailing ',', ';' and unbalanced closing brackets belong to the
 // surrounding syntax.
 func extendUnquoted(text string, start, end int) int {
@@ -350,6 +397,9 @@ func extendUnquoted(text string, start, end int) int {
 		}
 		if strings.ContainsRune("&;,(){}[]", r) && startsAssignment(text, extended+size) {
 			break
+		}
+		if r == ']' && strings.HasPrefix(text[extended+size:], "(") {
+			break // Markdown link: [password=x](https://...)
 		}
 		extended += size
 	}

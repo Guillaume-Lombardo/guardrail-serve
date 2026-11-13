@@ -201,4 +201,14 @@ func TestKeywordAndEntropyPhasesHonourContext(t *testing.T) {
 	if _, err := scanEntropy(&ctxPoll{ctx: ctx}, view, assignments, DefaultConfig().Entropy); !errors.Is(err, context.Canceled) {
 		t.Errorf("scanEntropy err = %v", err)
 	}
+	// URL and bearer candidates are not assignments.
+	for name, line := range map[string]string{
+		"url":    "https://admin:Zx9kQ2mR7@db.internal/x\n",
+		"bearer": "use bearer kQ2mR7xZ9pL4vN8sTw3 now\n",
+	} {
+		view := newTextView(strings.Repeat(line, 2*ctxCheckInterval))
+		if _, err := scanKeywords(&ctxPoll{ctx: ctx}, view, nil); !errors.Is(err, context.Canceled) {
+			t.Errorf("scanKeywords %s err = %v", name, err)
+		}
+	}
 }
