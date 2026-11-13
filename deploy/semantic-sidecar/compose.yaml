@@ -71,8 +71,9 @@ services:
     mem_limit: 2g
     cpus: 2
     restart: unless-stopped
-    # Above SIDECAR_SHUTDOWN_GRACE_SECONDS (20), which covers the 10 s inference deadline plus one
-    # micro-batch overrun (16.5 s observed in the worst case).
+    # Above SIDECAR_SHUTDOWN_GRACE_SECONDS (20). That grace exceeds the worst total request
+    # duration observed (about 16.5 s: the 10 s deadline plus about 6.5 s for the micro-batch
+    # in flight); it covers what was observed, not every CPU or batch size.
     stop_grace_period: 25s
     networks: [sidecar]
 

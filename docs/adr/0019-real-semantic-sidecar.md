@@ -113,8 +113,10 @@ reproducible checks, without touching the Go service's domain code.
 - Shutdown: on SIGTERM/SIGINT the server stops admitting requests (new and
   keep-alive requests get 503 `shutting_down`, the listening socket is closed),
   waits for the requests in flight, and exits 0. The wait is capped by
-  `SIDECAR_SHUTDOWN_GRACE_SECONDS` (default 20 s, above the 10 s cooperative
-  inference deadline plus the 16.5 s observed worst-case micro-batch overrun), and
+  `SIDECAR_SHUTDOWN_GRACE_SECONDS` (default 20 s: above the worst total
+  duration observed for a request, 16.5 s, which is the 10 s cooperative deadline plus
+  an overrun of about 6.5 s for the micro-batch in flight; this covers what was
+  observed, not every CPU or batch size), and
   the Compose `stop_grace_period` (25 s) stays above it. Handler threads remain
   daemon threads and the wait is a bounded count of active requests, not a join: an
   unbounded wait on a stuck backend or a stalled client would outlast the container

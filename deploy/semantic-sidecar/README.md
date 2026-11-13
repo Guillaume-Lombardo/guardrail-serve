@@ -145,9 +145,11 @@ The wait is bounded on purpose: the handler threads stay daemon threads, so a
 stuck backend or a client that stalls inside its body cannot hold the process
 beyond the grace period (an unbounded join could outlive the container stop timeout and
 end in SIGKILL anyway). The bound is sized from the cooperative inference deadline:
-a request already running at SIGTERM ends within `SIDECAR_INFERENCE_TIMEOUT_SECONDS`
-plus at most one micro-batch overrun (16.5 s observed for 32 texts of 512 tokens,
-10 s deadline, batch 8), so the `20` default covers it. **Keep the container stop
+a request already running at SIGTERM ends at its cooperative deadline
+(`SIDECAR_INFERENCE_TIMEOUT_SECONDS`) plus the micro-batch that was in flight. The worst
+case observed was 16.5 s in total (an overrun of about 6.5 s past the 10 s deadline, for
+32 texts of 512 tokens at batch 8), so the `20` default covers what was observed. It is
+not a universal guarantee: slower CPUs or larger batches overrun more. **Keep the container stop
 timeout above the grace period**: the Compose file sets `stop_grace_period: 25s`;
 with plain `docker run`, pass `--stop-timeout 25` (Docker's default is 10 s, which
 would cut the longest requests). If you raise the inference deadline or the batch

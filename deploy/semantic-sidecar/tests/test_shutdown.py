@@ -56,7 +56,8 @@ class Process:
         )
         self.events: list[dict] = []
         self._cond = threading.Condition()
-        threading.Thread(target=self._read_stderr, daemon=True).start()
+        self._reader = threading.Thread(target=self._read_stderr, daemon=True)
+        self._reader.start()
         line = self.proc.stdout.readline().strip()
         match = re.fullmatch(r"LISTENING (\d+)", line)
         if not match:
@@ -108,6 +109,10 @@ class Process:
         if self.proc.poll() is None:
             self.proc.kill()
         self.proc.wait()
+        self._reader.join(WAIT)
+        for stream in (self.proc.stdout, self.proc.stderr):
+            if stream is not None:
+                stream.close()
         self.tmp.cleanup()
 
 
