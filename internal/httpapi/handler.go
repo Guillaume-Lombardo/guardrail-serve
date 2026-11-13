@@ -58,12 +58,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	api := humago.NewWithPrefix(mux, h.config.APIPrefix, apiConfig)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "health",
-		Method:      http.MethodGet,
-		Path:        "/health/",
-		Summary:     "Health check",
-		Description: "Returns the service health state.",
-		Tags:        []string{"system"},
+		MaxBodyBytes: (1 << 20) + 1,
+		OperationID:  "health",
+		Method:       http.MethodGet,
+		Path:         "/health/",
+		Summary:      "Health check",
+		Description:  "Returns the service health state.",
+		Tags:         []string{"system"},
 	}, h.handleHealth)
 
 	h.registerGuardrailOperation(api, "/scan/secrets", "scanSecrets", "Detect secrets in text payloads.", h.secret)
@@ -71,13 +72,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	h.registerGuardrailOperation(api, "/scan/prompt-injection", "scanPromptInjection", "Detect prompt-injection patterns in text payloads.", h.prompt)
 
 	huma.Register(api, huma.Operation{
-		OperationID: "scanLiteLLMBasicGuardrail",
-		Method:      http.MethodPost,
-		Path:        "/beta/litellm_basic_guardrail_api",
-		Summary:     "Run the configured LiteLLM guardrail",
-		Description: "Executes the configured guardrail for the LiteLLM-compatible scan endpoint.",
-		Tags:        []string{"scan", "beta"},
-		Errors:      []int{http.StatusBadRequest, http.StatusBadGateway, http.StatusInternalServerError},
+		MaxBodyBytes: (1 << 20) + 1,
+		OperationID:  "scanLiteLLMBasicGuardrail",
+		Method:       http.MethodPost,
+		Path:         "/beta/litellm_basic_guardrail_api",
+		Summary:      "Run the configured LiteLLM guardrail",
+		Description:  "Executes the configured guardrail for the LiteLLM-compatible scan endpoint.",
+		Tags:         []string{"scan", "beta"},
+		Errors:       []int{http.StatusBadRequest, http.StatusBadGateway, http.StatusInternalServerError},
 	}, h.handleLiteLLM)
 }
 
@@ -105,13 +107,14 @@ func (h *Handler) registerGuardrailOperation(
 	guardrail domain.Guardrail,
 ) {
 	huma.Register(api, huma.Operation{
-		OperationID: operationID,
-		Method:      http.MethodPost,
-		Path:        path,
-		Summary:     guardrail.Name(),
-		Description: description,
-		Tags:        []string{"scan"},
-		Errors:      []int{http.StatusBadRequest, http.StatusBadGateway},
+		MaxBodyBytes: (1 << 20) + 1,
+		OperationID:  operationID,
+		Method:       http.MethodPost,
+		Path:         path,
+		Summary:      guardrail.Name(),
+		Description:  description,
+		Tags:         []string{"scan"},
+		Errors:       []int{http.StatusBadRequest, http.StatusBadGateway},
 	}, func(ctx context.Context, input *scanRequestInput) (*scanResponseOutput, error) {
 		return h.handleGuardrail(ctx, guardrail, input)
 	})

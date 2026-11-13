@@ -10,23 +10,25 @@ import (
 
 // Runtime contains transport protections. Zero values use safe defaults.
 type Runtime struct {
-	ReadHeaderTimeout time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
-	MaxBodyBytes      int64
-	APIKeys           []string
+	ReadHeaderTimeout     time.Duration
+	ReadTimeout           time.Duration
+	WriteTimeout          time.Duration
+	IdleTimeout           time.Duration
+	ShutdownTimeout       time.Duration
+	MaxBodyBytes          int64
+	MaxConcurrentRequests int
+	APIKeys               []string
 }
 
 func loadRuntime() Runtime {
 	r := Runtime{
-		ReadHeaderTimeout: runtimeDuration("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
-		ReadTimeout:       runtimeDuration("HTTP_READ_TIMEOUT", 15*time.Second),
-		WriteTimeout:      runtimeDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),
-		IdleTimeout:       runtimeDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
-		ShutdownTimeout:   runtimeDuration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
-		MaxBodyBytes:      1 << 20,
+		ReadHeaderTimeout:     runtimeDuration("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+		ReadTimeout:           runtimeDuration("HTTP_READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:          runtimeDuration("HTTP_WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:           runtimeDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		ShutdownTimeout:       runtimeDuration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+		MaxBodyBytes:          1 << 20,
+		MaxConcurrentRequests: 2,
 	}
 	if v := strings.TrimSpace(os.Getenv("HTTP_MAX_BODY_BYTES")); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -34,6 +36,13 @@ func loadRuntime() Runtime {
 			n = -1
 		}
 		r.MaxBodyBytes = n
+	}
+	if v := strings.TrimSpace(os.Getenv("HTTP_MAX_CONCURRENT_REQUESTS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			n = -1
+		}
+		r.MaxConcurrentRequests = n
 	}
 	if v := strings.TrimSpace(os.Getenv("GUARDRAIL_API_KEYS")); v != "" {
 		r.APIKeys = strings.Split(v, ",")
@@ -75,6 +84,9 @@ func (r Runtime) Defaults() Runtime {
 	if r.MaxBodyBytes == 0 {
 		r.MaxBodyBytes = 1 << 20
 	}
+	if r.MaxConcurrentRequests == 0 {
+		r.MaxConcurrentRequests = 2
+	}
 	return r
 }
 
@@ -92,6 +104,9 @@ func (r Runtime) Validate() error {
 	}
 	if r.MaxBodyBytes <= 0 || r.MaxBodyBytes > 1<<20 {
 		return fmt.Errorf("HTTP_MAX_BODY_BYTES must be between 1 and 1048576")
+	}
+	if r.MaxConcurrentRequests <= 0 {
+		return fmt.Errorf("HTTP_MAX_CONCURRENT_REQUESTS must be a positive integer")
 	}
 	for _, key := range r.APIKeys {
 		if key == "" || strings.ContainsAny(key, " \t\r\n") {

@@ -216,3 +216,16 @@ validates the branch integrated with L1. No production changes.
   passed with Go 1.26.11, GOMAXPROCS=2 and GOFLAGS=-p=1. Dead-code pass found no
   obsolete production path or import. No environment contract changed, so
   .env.template and local .env need no edits; no structural ADR is required.
+
+
+## C2 — Runtime resource bounds
+
+Authorized final corrective PR, based on main 6364b043ecac6164bf77854ea3f3514b972e81c8.
+- F1: positive concurrency configuration (default 2), admission after auth and
+  before body parsing; stable 503/Retry-After, health exemption and deferred release.
+- F2: Huma ceiling one byte above the inclusive transport ceiling; real HTTP
+  boundary tests on native and LiteLLM APIs with known/chunked lengths.
+- F3: safe bounded request IDs, UTF-8 User-Agent log bound, 32 KiB server headers.
+- Regression tests written and observed failing before fixes. Preserve strict scan,
+  permissive LiteLLM and C1 input/output scopes; no archive, Docker or production work.
+- Validate all Go suites and pre-commit, independent review, one open unmerged PR.

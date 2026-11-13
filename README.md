@@ -80,7 +80,7 @@ The LiteLLM response does not expose the internal scan `decision`/`metadata`
 fields. A guardrail returning misaligned text items produces HTTP `502` rather
 than an invalid rewrite.
 
-Each request returns an `X-Request-ID` header. If the client provides `X-Request-ID`, the service reuses it for request correlation.
+Requests reaching the API return an `X-Request-ID` header. Client IDs are reused only when they contain 1–128 ASCII letters, digits, dots, underscores or hyphens (`[A-Za-z0-9._-]`); otherwise an ID is generated. Logged User-Agent values are limited to 256 bytes of valid UTF-8. The server caps headers at 32 KiB (net/http adds a small parser allowance); larger headers receive HTTP `431`.
 
 ## Runtime configuration
 
@@ -98,12 +98,23 @@ Transport limits are independent of text limits:
 | `HTTP_IDLE_TIMEOUT` | `60s` | Keep-alive idle deadline |
 | `HTTP_SHUTDOWN_TIMEOUT` | `10s` | Graceful drain deadline after SIGTERM or SIGINT |
 | `HTTP_MAX_BODY_BYTES` | `1048576` | Maximum encoded request body size in bytes |
+| `HTTP_MAX_CONCURRENT_REQUESTS` | `2` | Maximum admitted requests, excluding health |
 | `GUARDRAIL_API_KEYS` | empty | Optional comma-separated API keys |
 
 Timeouts accept positive Go durations such as `500ms` or `30s`; invalid,
 non-positive or overflowing settings fail startup. The body limit must be a
-positive integer from `1` to `1048576`, matching the HTTP decoder ceiling. Oversized requests return HTTP `413`,
+positive integer from `1` to `1048576`, inclusive. The transport middleware owns this ceiling. Oversized requests return HTTP `413`,
 including bodies with unknown content length. Body read failures return `400`.
+`HTTP_MAX_CONCURRENT_REQUESTS` must be a positive integer; invalid, non-positive
+or overflowing values fail startup. Admission is nonblocking, after authentication
+and before body reading or parsing. Saturation returns `503` with
+`{"detail":"Service busy."}` and `Retry-After: 1`; missing credentials still
+return `401`. Health bypasses admission and body buffering.
+Malformed 1 MiB JSON can use roughly 120 MiB during schema validation in measured
+cases. The default of 2 limits simultaneous expensive requests, not total process
+memory: allow roughly 240 MiB for those cases plus baseline, GC and operational
+headroom, and size this setting against the deployment memory budget. This is an
+observed amplification, not a proven worst-case heap bound.
 On shutdown the server stops accepting connections, drains active requests, then
 closes remaining connections when the deadline expires.
 

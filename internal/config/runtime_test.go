@@ -3,7 +3,7 @@ package config
 import "testing"
 
 func TestRuntimeRejectsInvalidEnvironment(t *testing.T) {
-	for _, name := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "HTTP_MAX_BODY_BYTES"} {
+	for _, name := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "HTTP_MAX_BODY_BYTES", "HTTP_MAX_CONCURRENT_REQUESTS"} {
 		for _, value := range []string{"invalid", "0", "-1"} {
 			t.Run(name+value, func(t *testing.T) {
 				t.Setenv(name, value)
