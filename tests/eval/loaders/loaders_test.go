@@ -336,7 +336,7 @@ func TestCheckOutputPathRefusesSymlinkEscapes(t *testing.T) {
 			t.Errorf("%s accepted", path)
 		}
 	}
-	if err := loaders.CheckOutputPath(filepath.Join(scratchDir, "link", "..", "x.jsonl"), false); err == nil {
+	if err := loaders.CheckOutputPath(scratchDir+"/link/../x.jsonl", false); err == nil {
 		t.Error("path with .. components accepted")
 	}
 	if err := loaders.CheckOutputPath(filepath.Join(scratchDir, "ok", "x.jsonl"), false); err != nil {
