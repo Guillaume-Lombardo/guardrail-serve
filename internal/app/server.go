@@ -27,6 +27,7 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger) (*http.Server, 
 
 	return &http.Server{
 		Addr:              cfg.ListenAddr(),
+		MaxHeaderBytes:    32 << 10,
 		ReadHeaderTimeout: cfg.Runtime.ReadHeaderTimeout,
 		ReadTimeout:       cfg.Runtime.ReadTimeout,
 		WriteTimeout:      cfg.Runtime.WriteTimeout,
