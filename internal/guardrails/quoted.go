@@ -60,21 +60,23 @@ func negatedCue(frame string, start, end int) bool {
 		lead = string(r)
 	}
 	before := lead + frame[from:start]
+	to := min(len(frame), end+negationWindow)
+	for to > end && to < len(frame) && !utf8.RuneStart(frame[to]) {
+		to--
+	}
+	after := frame[end:to]
+	// "sans l'appliquer seulement en theorie" and "ne pas l'appliquer
+	// seulement..." restrict the cue as well: they stay affirmative.
 	if sansBefore.MatchString(before) {
-		return true
+		return !restrictiveAfter.MatchString(after)
 	}
 	match := neBefore.FindStringSubmatchIndex(before)
 	if match == nil {
 		return false
 	}
 	if match[2*adverbGroup] >= 0 {
-		return true
+		return !restrictiveAfter.MatchString(after)
 	}
-	to := min(len(frame), end+negationWindow)
-	for to > end && to < len(frame) && !utf8.RuneStart(frame[to]) {
-		to--
-	}
-	after := frame[end:to]
 	adverb := negatedAfter.FindStringIndex(after)
 	return adverb != nil && !restrictiveAfter.MatchString(after[adverb[1]:])
 }

@@ -470,4 +470,9 @@ the orchestrator.
 - [x] Docs: ADR 0018, `tests/eval/README.md`.
 - [ ] Root README Evaluation sync (artifacts, table, ADR 0018): deferred to L10
   after merge.
-- [ ] PR CI and review: tracked on the L9 PR. Open, not merged by this lot.
+- [x] Independent review: six rounds; rounds 1–5 found nine issues to fix
+  (refusals and prohibitions flagged, verbs matched inside words, pronoun and
+  negation handling of the quoted-analysis exemption). Each one was fixed
+  with a test that fails first. Round 6: APPROVE, no blocker or should; its
+  one nit is fixed as well.
+- [ ] PR CI: tracked on the L9 PR. Open, not merged by this lot.
