@@ -112,3 +112,13 @@ do not commit them, and do not paste them into issues or PRs.
 | `imported_test.go` | Loader output from the fixtures runs next to the original corpus; corpora stay separate in the report. |
 | `loaders/*_test.go` | Mapping, skip rules, pinned download (local `httptest` server), digest mismatch, output-path guard. |
 | `cmd/guardrail-eval/eval/*_test.go` | Metrics, zero-denominator rule, client limits, runner, report, CLI. |
+
+## Offline regression gate
+
+`../../scripts/eval-offline.sh` (run from the repository root as
+`scripts/eval-offline.sh`) measures the original corpus over real loopback HTTP.
+`baseline/original-v1.json` pins its hash, per-case detections and measured
+per-detector/language metrics. `gate/` tests comparison, compensation protection,
+request failures and an injected HTTP degradation with a nonzero process exit.
+See the root README Evaluation section and ADR 0015 for thresholds and refresh.
+Imported public corpora are excluded from this gate and remain separate.
