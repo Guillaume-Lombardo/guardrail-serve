@@ -28,8 +28,8 @@ type RequestContext struct {
 }
 
 func NewRequestContext(request *http.Request) *RequestContext {
-	requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
-	if requestID == "" {
+	requestID := request.Header.Get("X-Request-ID")
+	if !validRequestID(requestID) {
 		requestID = generateRequestID()
 	}
 
@@ -38,7 +38,7 @@ func NewRequestContext(request *http.Request) *RequestContext {
 		Method:     request.Method,
 		Path:       request.URL.Path,
 		RemoteAddr: request.RemoteAddr,
-		UserAgent:  request.UserAgent(),
+		UserAgent:  boundedUserAgent(request.UserAgent()),
 		StartedAt:  time.Now().UTC(),
 	}
 }
@@ -92,4 +92,26 @@ func generateRequestID() string {
 		return time.Now().UTC().Format("20060102150405.000000000")
 	}
 	return hex.EncodeToString(bytes)
+}
+
+// Request IDs accept only 1-128 ASCII letters, digits, dots, underscores and hyphens.
+func validRequestID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func boundedUserAgent(value string) string {
+	// Bound work before sanitizing, then discard a partial final rune.
+	if len(value) > 256 {
+		value = value[:256]
+	}
+	value = strings.ToValidUTF8(value, "")
+	return value
 }

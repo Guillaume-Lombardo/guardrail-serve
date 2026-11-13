@@ -15,6 +15,8 @@ import (
 )
 
 func runtimeHandler(cfg config.Config, next http.Handler) http.Handler {
+	cfg.Runtime = cfg.Runtime.Defaults()
+	slots := make(chan struct{}, cfg.Runtime.MaxConcurrentRequests)
 	keys := make([][sha256.Size]byte, len(cfg.Runtime.APIKeys))
 	for i, key := range cfg.Runtime.APIKeys {
 		keys[i] = sha256.Sum256([]byte(key))
@@ -33,6 +35,19 @@ func runtimeHandler(cfg config.Config, next http.Handler) http.Handler {
 				runtimeError(w, http.StatusUnauthorized, "Unauthorized.")
 				return
 			}
+		}
+		// Health has no body to parse and must remain available under saturation.
+		if health {
+			next.ServeHTTP(w, r)
+			return
+		}
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			runtimeError(w, http.StatusServiceUnavailable, "Service busy.")
+			return
 		}
 		if r.ContentLength > cfg.Runtime.MaxBodyBytes {
 			runtimeError(w, http.StatusRequestEntityTooLarge, "Request body too large.")
