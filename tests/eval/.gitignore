@@ -1,0 +1,4 @@
+# Public datasets are imported on demand and never versioned.
+.agent-tmp/
+imported/
+*.imported.jsonl
