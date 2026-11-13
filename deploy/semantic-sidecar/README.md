@@ -87,7 +87,7 @@ matters because a container on the default bridge could open outbound
 connections (observed from a plain `docker run`), which the runtime never needs.
 The Compose stack itself has not been run yet (`integration_pending`): verify
 after `up` that the sidecar cannot reach the Internet, for example with
-`docker compose exec semantic-sidecar python -c "import urllib.request as u; u.urlopen('https://1.1.1.1', timeout=3)"`,
+`docker compose -f deploy/semantic-sidecar/compose.yaml exec semantic-sidecar python -c "import urllib.request as u; u.urlopen('https://1.1.1.1', timeout=3)"`,
 which must fail. A standalone `docker run` (used for validation) is on the
 default bridge and not isolated; add `--network none` if you do not need to
 publish a port. No host firewall or service configuration is changed by this
@@ -141,7 +141,7 @@ figures, not a capacity guarantee.
 
 That is about 125 ms per 510-character chunk, linear. Other results: ready 3.6-4.3 s
 after start; labels `SAFE`/`INJECTION` confirmed, score = probability of
-`INJECTION`, order-independent; 510 `a` accepted, 511 rejected with 422
+`INJECTION`, order-independent; a text of 510 `a` characters accepted, 511 rejected with 422
 (`text_too_long`, no truncation); a 510-rune CJK chunk is rejected (422), 510
 emoji are accepted; the Go test `TestRealModel` and the Go service passed
 (`SEMANTIC_TIMEOUT=2s`, closed: attack blocked in 0.18 s, 6 000 characters in

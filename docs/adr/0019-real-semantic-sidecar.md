@@ -140,7 +140,7 @@ described under "Changes after validation".
 - **Validated**: image build (model downloaded at the pinned commit, safetensors
   sha256 matches), model load and readiness (3.6-4.3 s), labels `SAFE`/`INJECTION`
   and score = probability of `INJECTION`, the `scores` contract and its negative
-  cases, the 512-token limit (511 tokens rejected with 422, no truncation), container
+  cases, the 512-token limit (a text of 510 `a` characters accepted, 511 rejected with 422 and not truncated; the token count of those probes was not recorded), container
   hardening (uid 65532, read-only root, dropped capabilities, offline, memory and CPU
   limits), the Go test `TestRealModel`, and the Go service against the sidecar
   (attack blocked; fail-closed 502 and fail-open warning). Latency is about 125 ms per
