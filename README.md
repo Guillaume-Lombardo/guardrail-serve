@@ -383,3 +383,49 @@ policies; other labels are enums. Unexpected observer values collapse to
 raw URLs or unknown user-selected policy names become labels. Cardinality grows
 only with operator-loaded policies and detector chains. See
 [ADR 0014](docs/adr/0014-prometheus-observation.md).
+
+## Evaluation
+
+Run the versioned FR/EN offline regression gate from the repository root:
+
+```sh
+scripts/eval-offline.sh
+```
+
+Provision the Go toolchain specified in `go.mod` and modules first (`go mod download`).
+Evaluation itself disables Go downloads, uses the real service over an ephemeral
+loopback HTTP listener, and requires no datasets, models, LLM, API key or `.env`.
+The separate Evaluation workflow uploads `.agent-tmp/eval/{current,gate}.json`.
+A request failure or regression produces a nonzero test/process exit status.
+
+The [baseline](tests/eval/baseline/original-v1.json) records measurements at
+`f3950e90e22a3e8bcb20443ae33f16591d618a13` for the unchanged 83-case original
+corpus. All known false positives/negatives remain visible by case ID. Metrics
+below are rounded for readability; gates use full precision.
+
+| Detector | Language | TP | FP | TN | FN | Precision | Recall | FPR |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| detect_pii | en | 8 | 2 | 34 | 0 | .800000 | 1 | .055556 |
+| detect_pii | fr | 5 | 2 | 31 | 0 | .714286 | 1 | .060606 |
+| detect_secret | en | 8 | 3 | 32 | 1 | .727273 | .888889 | .085714 |
+| detect_secret | fr | 7 | 2 | 29 | 1 | .777778 | .875000 | .064516 |
+| prompt_injection | en | 5 | 1 | 36 | 2 | .833333 | .714286 | .027027 |
+| prompt_injection | fr | 3 | 0 | 33 | 3 | 1 | .500000 | 0 |
+
+For every detector total and detector/language group, precision/recall must be
+at least baseline and FPR at most baseline. Every previously correct case label
+must remain correct: an improvement cannot compensate for a regression elsewhere.
+Zero-denominator metrics use `defined: false` (no numeric bound); a previously
+defined metric must remain defined. Corpora are never pooled.
+
+To refresh after an improvement, run the old gate first, then:
+
+```sh
+GOPROXY=off GOTOOLCHAIN=local go test ./tests/eval \
+  -run '^TestOfflineRegressionGate$' -count=1 -update-eval-baseline
+```
+
+The refresh refuses regressions against the old baseline. Review and commit the
+old/new metrics and corrected case IDs as evidence; do not relax thresholds or
+edit corpus labels to get a pass. See [ADR 0015](docs/adr/0015-offline-regression-gate.md)
+and the [evaluation CLI documentation](cmd/guardrail-eval/README.md).

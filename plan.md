@@ -350,6 +350,23 @@ Delivered:
   three rounds total, final APPROVE with no open findings.
 - No environment contract change; no archive, regex/YAML or other-lot changes.
 
+## L7b — Offline evaluation regression gate
+
+Validated scope, base f3950e90e22a3e8bcb20443ae33f16591d618a13:
+- Reuse L7a's HTTP runner and immutable 83-case original FR/EN corpus.
+- Pin measured counts/precision/recall/FPR by detector and language, explicit
+  undefined ratios, and every case outcome; retain the 17 known FP/FN labels.
+- Require nondecreasing precision/recall and nonincreasing FPR plus protection
+  of each previously correct case; explicit refresh must pass the old gate.
+- Separate Evaluation workflow, ephemeral loopback real handler, no datasets,
+  models, LLM calls or evaluation-time downloads. Text-free JSON artifacts.
+- Comparator tests, compensated-regression test and subprocess proof that an
+  injected HTTP degradation exits nonzero. ADR 0015 and README Evaluation.
+- No detector, domain, service config, dependency or environment contract change.
+
+Implementation and local proof recorded in the L7b PR. CI/review delivery status
+is authoritative on that PR; leave open and unmerged for full-stop handoff.
+
 ## C3 — Invalid-text error contract documentation
 
 Validated scope: align the README and ADR 0013 with the existing HTTP 502
