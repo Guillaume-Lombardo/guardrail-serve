@@ -19,12 +19,15 @@ type RequestContext struct {
 	RemoteAddr  string
 	UserAgent   string
 	Guardrail   string
+	Policy      string
 	InputType   string
 	Decision    string
 	ErrorDetail string
 	StatusCode  int
 	TextCount   int
-	StartedAt   time.Time
+	// FindingCount is the only finding information logged; values never are.
+	FindingCount int
+	StartedAt    time.Time
 }
 
 func NewRequestContext(request *http.Request) *RequestContext {
@@ -70,6 +73,9 @@ func (r *RequestContext) Attrs(duration time.Duration) []slog.Attr {
 	if r.Guardrail != "" {
 		attrs = append(attrs, slog.String("guardrail", r.Guardrail))
 	}
+	if r.Policy != "" {
+		attrs = append(attrs, slog.String("policy", r.Policy))
+	}
 	if r.InputType != "" {
 		attrs = append(attrs, slog.String("input_type", r.InputType))
 	}
@@ -78,6 +84,9 @@ func (r *RequestContext) Attrs(duration time.Duration) []slog.Attr {
 	}
 	if r.TextCount > 0 {
 		attrs = append(attrs, slog.Int("text_count", r.TextCount))
+	}
+	if r.Decision != "" {
+		attrs = append(attrs, slog.Int("finding_count", r.FindingCount))
 	}
 	if r.ErrorDetail != "" {
 		attrs = append(attrs, slog.String("error_detail", r.ErrorDetail))

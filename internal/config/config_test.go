@@ -35,3 +35,22 @@ func TestLoadNormalizesLogFormat(t *testing.T) {
 		t.Fatalf("LogFormat = %q, want %q", got, want)
 	}
 }
+
+func TestLoadLiteLLMDefaultPolicyPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, current, legacy, want string
+	}{
+		{"default", "", "", DefaultLiteLLMPolicy},
+		{"legacy alias", "", "prompt_injection", "prompt_injection"},
+		{"current wins", "default", "prompt_injection", "default"},
+		{"trimmed", " audit ", "", "audit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LITELLM_DEFAULT_POLICY", tc.current)
+			t.Setenv("LITELLM_GUARDRAIL_NAME", tc.legacy)
+			if got := Load().LiteLLMDefaultPolicy; got != tc.want {
+				t.Fatalf("LiteLLMDefaultPolicy = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

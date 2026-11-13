@@ -15,6 +15,7 @@ import (
 	"github.com/g1lom/guardrail-serve/internal/domain"
 	"github.com/g1lom/guardrail-serve/internal/httpapi"
 	"github.com/g1lom/guardrail-serve/internal/observability"
+	"github.com/g1lom/guardrail-serve/internal/policy"
 )
 
 func TestLiteLLMHandlerUsesConfiguredGuardrail(t *testing.T) {
@@ -22,7 +23,7 @@ func TestLiteLLMHandlerUsesConfiguredGuardrail(t *testing.T) {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -62,7 +63,7 @@ func TestLiteLLMHandlerRejectsUnknownScope(t *testing.T) {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "prompt_injection",
+		LiteLLMDefaultPolicy: "prompt_injection",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -93,7 +94,7 @@ func TestHandlerRejectsTrailingJSONPayload(t *testing.T) {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -127,7 +128,7 @@ func TestHandlerReturnsJSONForMethodNotAllowed(t *testing.T) {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -164,7 +165,7 @@ func TestHandlerPropagatesRequestIDAndLogsRequestContext(t *testing.T) {
 		ProjectName:          "guardrail-serve",
 		LogFormat:            "json",
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	}, logger)
@@ -232,7 +233,7 @@ func TestHandlerRejectsRequestWithoutTexts(t *testing.T) {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -270,7 +271,7 @@ func TestHandlerRejectsUnsupportedNonTextFields(t *testing.T) {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -308,52 +309,48 @@ func TestHandlerRejectsUnsupportedNonTextFields(t *testing.T) {
 func TestHandlerReturnsBadGatewayWhenGuardrailExecutionFails(t *testing.T) {
 	t.Parallel()
 
-	logger := observability.NewLogger(&bytes.Buffer{}, "human", "guardrail-serve")
-	maxLength := fakeGuardrail{name: "max_length", scopes: []domain.Scope{domain.ScopeRequest, domain.ScopeResponse}}
-	secret := fakeGuardrail{
-		name:   "detect_secret",
-		scopes: []domain.Scope{domain.ScopeRequest, domain.ScopeResponse},
-		err:    errors.New("provider unavailable"),
+	var logs bytes.Buffer
+	logger := observability.NewLogger(&logs, "json", "guardrail-serve")
+	failing := failingDetector{name: "detect_secret", err: errors.New("provider unavailable")}
+	steps := []policy.Step{{Detector: failing, Action: domain.ActionMask, Mask: policy.LiteralMask("[REDACTED]")}}
+	scanPolicy, err := policy.NewPolicy("scan-detect-secret", domain.ModeEnforce, steps, steps)
+	if err != nil {
+		t.Fatal(err)
 	}
-	pii := fakeGuardrail{name: "detect_pii", scopes: []domain.Scope{domain.ScopeRequest, domain.ScopeResponse}}
-	prompt := fakeGuardrail{name: "prompt_injection", scopes: []domain.Scope{domain.ScopeRequest}}
+	catalog, err := policy.NewCatalog(scanPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	apiHandler := httpapi.NewHandler(
-		config.Config{SecretMask: "[REDACTED]", MaxTextItems: 20, MaxTextChars: 20000},
+		config.Config{SecretMask: "[REDACTED]", LiteLLMDefaultPolicy: scanPolicy.Name},
 		logger,
-		domain.NewRegistry(maxLength, secret, pii, prompt),
-		maxLength,
-		secret,
-		pii,
-		prompt,
+		policy.NewEngine(nil),
+		catalog,
+		httpapi.ScanPolicies{Secrets: scanPolicy, PII: scanPolicy, PromptInjection: scanPolicy},
 	)
 	mux := http.NewServeMux()
 	apiHandler.Register(mux)
 	handler := apiHandler.WithObservability(mux)
 
-	requestBody := map[string]any{
-		"texts":      []string{"token=tok_456"},
-		"input_type": "request",
-	}
-	body, err := json.Marshal(requestBody)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
+	for _, route := range []string{"/scan/secrets", "/v1/guardrails/scan-detect-secret", "/beta/litellm_basic_guardrail_api"} {
+		request := httptest.NewRequest(http.MethodPost, route, strings.NewReader(`{"texts":["token=tok_456"],"input_type":"request"}`))
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
 
-	request := httptest.NewRequest(http.MethodPost, "/scan/secrets", bytes.NewReader(body))
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadGateway)
+		if recorder.Code != http.StatusBadGateway {
+			t.Fatalf("%s: status = %d, want %d body=%s", route, recorder.Code, http.StatusBadGateway, recorder.Body.String())
+		}
+		var response map[string]string
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if got, want := response["detail"], "Guardrail execution failed."; got != want {
+			t.Fatalf("detail = %q, want %q", got, want)
+		}
 	}
-
-	var response map[string]string
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got, want := response["detail"], "Guardrail execution failed."; got != want {
-		t.Fatalf("detail = %q, want %q", got, want)
+	if !strings.Contains(logs.String(), `"detector":"detect_secret"`) || strings.Contains(logs.String(), "tok_456") {
+		t.Fatalf("logs must name the detector without text values: %s", logs.String())
 	}
 }
 
@@ -365,7 +362,7 @@ func TestHandlerServesDocsAndOpenAPIWithPrefix(t *testing.T) {
 		ProjectName:          "guardrail-serve",
 		APIVersion:           "0.1.0",
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
@@ -411,36 +408,17 @@ func TestHandlerServesDocsAndOpenAPIWithPrefix(t *testing.T) {
 	}
 }
 
-type fakeGuardrail struct {
-	name   string
-	scopes []domain.Scope
-	result domain.Result
-	err    error
+type failingDetector struct {
+	name string
+	err  error
 }
 
-func (f fakeGuardrail) Name() string {
-	return f.name
-}
+func (f failingDetector) Name() string { return f.name }
 
-func (f fakeGuardrail) Supports(scope domain.Scope) bool {
-	for _, item := range f.scopes {
-		if item == scope {
-			return true
-		}
-	}
-	return false
-}
+func (f failingDetector) Supports(domain.Stage) bool { return true }
 
-func (f fakeGuardrail) Apply(_ context.Context, payload domain.Payload) (domain.Result, error) {
-	if f.err != nil {
-		return domain.Result{}, f.err
-	}
-	if f.result.Decision != "" {
-		return f.result, nil
-	}
-	return domain.Result{
-		Texts:    payload.Texts,
-		Decision: domain.DecisionNone,
-		Metadata: map[string]any{},
-	}, nil
+func (f failingDetector) BlockReason() string { return "failing" }
+
+func (f failingDetector) Detect(context.Context, string) ([]domain.Detection, error) {
+	return nil, f.err
 }

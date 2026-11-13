@@ -17,7 +17,7 @@ func newTestHandler(t *testing.T) http.Handler {
 
 	handler, err := app.NewHandler(config.Config{
 		SecretMask:           "[REDACTED]",
-		LiteLLMGuardrailName: "detect_secret",
+		LiteLLMDefaultPolicy: "detect_secret",
 		MaxTextItems:         20,
 		MaxTextChars:         20000,
 	})
