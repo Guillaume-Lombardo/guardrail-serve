@@ -107,6 +107,10 @@ func (c RunConfig) Validate() error {
 	return nil
 }
 
+// BuildRevision and BuildModified are set at link time by run-bench.sh build
+// (-ldflags -X) when the toolchain cannot stamp VCS information.
+var BuildRevision, BuildModified string
+
 // Run evaluates every case of the corpus once, sequentially.
 func Run(ctx context.Context, cfg RunConfig) (*RunFile, error) {
 	if err := cfg.Validate(); err != nil {
@@ -444,6 +448,11 @@ func hostEnvironment(root string) Environment {
 				env.BinaryModified = setting.Value == "true"
 			}
 		}
+	}
+	if env.BinaryRevision == "" {
+		// Git worktrees whose repository lives outside the module get no VCS
+		// stamp; run-bench.sh build injects the revision instead.
+		env.BinaryRevision, env.BinaryModified = BuildRevision, BuildModified == "true"
 	}
 	if out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output(); err == nil {
 		env.Commit = strings.TrimSpace(string(out))

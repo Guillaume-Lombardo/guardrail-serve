@@ -92,7 +92,12 @@ phase=${1:-}
 mkdir -p "$OUT" "$RESULTS"
 case $phase in
   build)
-    cd "$ROOT" && $RUNNER go build -o "$BIN" ./cmd/guardrail-bench ;;
+    cd "$ROOT"
+    modified=false
+    [ -z "$(git status --porcelain)" ] || modified=true
+    pkg=github.com/g1lom/guardrail-serve/cmd/guardrail-bench/bench
+    $RUNNER go build -ldflags "-X $pkg.BuildRevision=$(git rev-parse HEAD) -X $pkg.BuildModified=$modified" \
+      -o "$BIN" ./cmd/guardrail-bench ;;
   calibration)
     [ -e "$OUT/calibration-rules.json" ] || bench run -root "$ROOT" -mode rules -corpus bench-calibration -cache-dir "$CACHE" \
       -run-id calibration-rules -out "$OUT/calibration-rules.json"
