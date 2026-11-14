@@ -659,7 +659,7 @@ the orchestrator.
   caches answers per hash of the masked request, enforces the budget and refuses
   unmasked egress. The cascade reuses both caches (no new inference, no new call).
 - Budget: L12 Jev cap USD 5 (visible credit USD 10, confirmed 14/11 12:05). Proxy caps
-  per bench: 200 upstream calls, USD 1 cumulative estimate, stop on 401 or 2
+  cumulative over the private ledger: 200 upstream calls, USD 1, stop on 401 or 2
   consecutive 402/429. Cost estimate recorded before any paid call.
 - Acceptance: offline tests for leaks (wire), calibration rules, cost, cache and
   metrics; results JSON, PNG chart and a key-free reproducer; EVALUATION.md and
@@ -692,6 +692,11 @@ the orchestrator.
   call and kept as spent when billing is unknown (transport failure, 5xx, unreadable
   answer, invalid usage); every attempt is ledgered; paid traffic stops when another
   model version is served; answers are reduced to the `noul` value before caching.
+- Final review fixes (14/11/2026): caps cumulative over a locked ledger (a rerun cannot
+  reset them); billed errors and unknown-billing reservations charged to their case and
+  published apart; the CLI refuses an uncommitted or edited protocol and records its
+  commit; cached answers reduced again on read; the report checks judge decisions
+  against the recorded probability and refuses repeated runs with another coverage.
 - Outcome (14/11/2026, details in `deploy/semantic-sidecar/EVALUATION.md`):
   - Calibration 16:54 to 17:07, protocol frozen and committed (`77e366c`, sha256
     `46076199654a…`) before the test runs (17:08 to 17:41). No error except one test

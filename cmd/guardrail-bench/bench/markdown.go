@@ -35,6 +35,9 @@ func Markdown(results *Results) string {
 			if row.USDPer1000 != nil {
 				cost = fmt.Sprintf("%.4f", *row.USDPer1000)
 			}
+			if row.UnknownUSD > 0 {
+				cost += fmt.Sprintf(" + USD %.6f unknown billing", row.UnknownUSD)
+			}
 			if row.VersusRef != nil {
 				mcnemar = fmt.Sprintf("%.3f (%d/%d)", row.VersusRef.PValue, row.VersusRef.OnlyA, row.VersusRef.OnlyB)
 			}
@@ -54,8 +57,8 @@ func Markdown(results *Results) string {
 	fmt.Fprintf(&b, "Reference: %s, recall %s. D1 allows at most %d false positives on bench-test. Passing: %s. Change default: %v.\n\n",
 		results.Decision.Reference, rate(results.Decision.ReferenceRecall), results.Decision.MaxFP,
 		orNone(results.Decision.Passing), results.Decision.ChangeDefault)
-	fmt.Fprintf(&b, "Paid judge traffic: %d calls, %d input tokens, USD %.6f, %d refused, %d egress blocked, %d failures.\n",
-		results.Paid.Calls, results.Paid.InputTokens, results.Paid.CostUSD, results.Paid.Refused, results.Paid.Egress, results.Paid.Failures)
+	fmt.Fprintf(&b, "Paid judge traffic: %d calls, %d input tokens, USD %.6f billed, USD %.6f of unknown billing (worst case), %d refused, %d egress blocked, %d failures.\n",
+		results.Paid.Calls, results.Paid.InputTokens, results.Paid.CostUSD, results.Paid.UnknownUSD, results.Paid.Refused, results.Paid.Egress, results.Paid.Failures)
 	return b.String()
 }
 

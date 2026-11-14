@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"sort"
 	"sync"
@@ -23,7 +22,9 @@ const JevUSDPerMillionInputTokens = 0.042
 // JevUpstream is the documented System One endpoint.
 const JevUpstream = "https://api.typesafe.ai/v1/systemone"
 
-// Budget bounds paid traffic. The worst case is checked before every call.
+// Budget bounds paid traffic. Its caps are cumulative over the ledger (every
+// earlier run and process included), and the worst case of the next call is
+// checked before it is sent.
 type Budget struct {
 	MaxCalls int     `json:"max_calls"`
 	MaxUSD   float64 `json:"max_usd"`
@@ -120,6 +121,7 @@ type JevProxy struct {
 	trace    *tracer
 	delay    bool
 	now      func() time.Time
+	prior    LedgerTotals
 
 	mu          sync.Mutex
 	stats       JudgeStats
@@ -136,7 +138,7 @@ type JevProxyConfig struct {
 	Key      []byte
 	Cache    *Cache
 	Budget   Budget
-	Ledger   io.Writer
+	Ledger   *Ledger // required in live mode: the durable spend the caps count from
 	Delay    bool
 	Client   *http.Client
 }
@@ -162,13 +164,17 @@ func newJevProxy(cfg JevProxyConfig, trace *tracer) (*JevProxy, error) {
 			Timeout:       30 * time.Second,
 		}
 	}
-	ledger := cfg.Ledger
-	if ledger == nil {
-		ledger = io.Discard
+	var ledger io.Writer = io.Discard
+	var prior LedgerTotals
+	switch {
+	case cfg.Ledger != nil:
+		ledger, prior = cfg.Ledger, cfg.Ledger.Prior()
+	case cfg.Live:
+		return nil, errors.New("live judge mode needs the durable ledger")
 	}
 	return &JevProxy{
 		live: cfg.Live, upstream: cfg.Upstream, key: cfg.Key, cache: cfg.Cache, budget: cfg.Budget,
-		ledger: ledger, client: client, trace: trace, delay: cfg.Delay, now: time.Now, leaks: map[string]int{},
+		ledger: ledger, client: client, trace: trace, delay: cfg.Delay, now: time.Now, prior: prior, leaks: map[string]int{},
 	}, nil
 }
 
@@ -236,6 +242,15 @@ func (p *JevProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	source := "hit"
 	if ok {
+		// An entry written by an earlier format may hold more than the reduced
+		// answer: it is reduced again, and refused when it does not fit.
+		entry, err = reduceAnswer(entry.response(), request, entry.UpstreamMS)
+		if err != nil {
+			p.fail(func(s *JudgeStats) { s.Failures++ })
+			p.trace.with(func(t *caseTrace) { t.judgeCalls++; t.judgeCache = "error" })
+			writeJevError(w, http.StatusBadGateway, "cached judge answer is not a reduced answer")
+			return
+		}
 		p.mu.Lock()
 		p.stats.CacheHits++
 		p.mu.Unlock()
@@ -250,7 +265,7 @@ func (p *JevProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var status int
-		entry, status, err = p.call(r.Context(), key, request.Model, body)
+		entry, status, err = p.call(r.Context(), key, request, body)
 		if err != nil {
 			p.trace.with(func(t *caseTrace) { t.judgeCalls++; t.judgeCache = "error" })
 			writeJevError(w, status, err.Error())
@@ -264,7 +279,10 @@ func (p *JevProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.judgeCalls++
 		t.judgeProb = probability
 		t.judgeMS += entry.UpstreamMS
-		t.tokens += tokens
+		if source == "hit" {
+			// A live call already traced its billed tokens when it settled.
+			t.tokens += tokens
+		}
 		t.judgeCache = source
 	})
 	w.Header().Set("Content-Type", "application/json")
@@ -286,7 +304,7 @@ func (p *JevProxy) fail(fn func(*JudgeStats)) {
 // is reserved before sending; when the billing of an attempt cannot be known
 // (transport failure, 5xx, unreadable 200 or invalid usage) the reservation is
 // kept as spent, so an unknown outcome can never let the budget drift.
-func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (JevEntry, int, error) {
+func (p *JevProxy) call(ctx context.Context, key string, asked jevRequest, body []byte) (JevEntry, int, error) {
 	worst := WorstCaseUSD()
 	p.mu.Lock()
 	switch {
@@ -295,13 +313,13 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 		reason := p.stats.StopReason
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: " + reason)
-	case p.stats.Upstream >= p.budget.MaxCalls:
-		p.stats.StopReason = fmt.Sprintf("call cap %d reached", p.budget.MaxCalls)
+	case p.prior.Calls+p.stats.Upstream >= p.budget.MaxCalls:
+		p.stats.StopReason = fmt.Sprintf("cumulative call cap %d reached", p.budget.MaxCalls)
 		p.stats.Refused++
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: call cap")
-	case p.stats.CostUSD+p.stats.UnknownBillingUSD+p.inflightUSD+worst > p.budget.MaxUSD:
-		p.stats.StopReason = fmt.Sprintf("worst-case cost would exceed USD %.2f", p.budget.MaxUSD)
+	case p.prior.SpentUSD+p.stats.CostUSD+p.stats.UnknownBillingUSD+p.inflightUSD+worst > p.budget.MaxUSD:
+		p.stats.StopReason = fmt.Sprintf("worst-case cumulative cost would exceed USD %.2f", p.budget.MaxUSD)
 		p.stats.Refused++
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: budget")
@@ -311,7 +329,8 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 	p.inflightUSD += worst
 	p.mu.Unlock()
 
-	// Every attempt leaves one text-free ledger line and settles its reservation.
+	// Every attempt leaves one text-free ledger line, settles its reservation
+	// and charges its case, whether the answer is then used or not.
 	line := LedgerLine{Time: p.now().UTC().Format(time.RFC3339), Key: key[:16], BodyBytes: len(body), Billing: BillingUnknown}
 	defer func() {
 		p.mu.Lock()
@@ -324,8 +343,16 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 			p.stats.UnknownBillingUSD += worst
 			line.CostUSD = worst
 		}
-		line.SpentUSD = p.stats.CostUSD + p.stats.UnknownBillingUSD
+		line.SpentUSD = p.prior.SpentUSD + p.stats.CostUSD + p.stats.UnknownBillingUSD
 		p.mu.Unlock()
+		p.trace.with(func(t *caseTrace) {
+			switch line.Billing {
+			case BillingKnown:
+				t.tokens += line.InputTokens
+			case BillingUnknown:
+				t.unknownUSD += worst
+			}
+		})
 		encoded, _ := json.Marshal(line)
 		_, _ = p.ledger.Write(append(encoded, '\n'))
 	}()
@@ -392,12 +419,12 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 	p.mu.Lock()
 	p.consecutive = 0
 	p.mu.Unlock()
-	if decoded.Model != model {
+	if decoded.Model != asked.Model {
 		// A different version would be measured under the pinned name: stop, keep nothing.
 		p.stop("upstream served another model version")
 		return JevEntry{}, http.StatusBadGateway, errors.New("upstream served another model version")
 	}
-	entry, err := reduceAnswer(decoded, body, elapsed)
+	entry, err := reduceAnswer(decoded, asked, elapsed)
 	if err != nil {
 		p.fail(func(s *JudgeStats) { s.Failures++ })
 		return JevEntry{}, http.StatusBadGateway, err
@@ -424,13 +451,29 @@ type jevResponse struct {
 	} `json:"usage"`
 }
 
-// reduceAnswer keeps only what the service decodes: the one asked question and
-// its noul probability in [0, 1]. Any other upstream field (an explanation, an
-// echo of the input) is dropped before the answer is cached or forwarded.
-func reduceAnswer(decoded jevResponse, body []byte, elapsed float64) (JevEntry, error) {
-	var request jevRequest
-	if err := json.Unmarshal(body, &request); err != nil || len(request.Questions) != 1 {
+// response is a cached entry seen as an upstream answer, to be reduced again.
+func (e JevEntry) response() jevResponse {
+	var decoded jevResponse
+	decoded.Model, decoded.Answers = e.Model, e.Answers
+	if tokens, ok := e.Usage["input_tokens"]; ok {
+		decoded.Usage.InputTokens = &tokens
+	}
+	if tokens, ok := e.Usage["output_tokens"]; ok {
+		decoded.Usage.OutputTokens = &tokens
+	}
+	return decoded
+}
+
+// reduceAnswer keeps only what the service decodes: the answer of the model
+// that was asked, to the one asked question, as a noul probability in [0, 1],
+// with its usage. Any other upstream field (an explanation, an echo of the
+// input) is dropped before the answer is cached or forwarded.
+func reduceAnswer(decoded jevResponse, request jevRequest, elapsed float64) (JevEntry, error) {
+	if len(request.Questions) != 1 {
 		return JevEntry{}, errors.New("judge request must ask exactly one question")
+	}
+	if decoded.Model != request.Model || decoded.Usage.InputTokens == nil || *decoded.Usage.InputTokens < 0 {
+		return JevEntry{}, errors.New("judge answer is not for the asked model or has no usage")
 	}
 	var name string
 	for question := range request.Questions {
@@ -481,9 +524,4 @@ func noulProbability(entry JevEntry) *float64 {
 		}
 	}
 	return nil
-}
-
-// OpenLedger appends to the private paid-call ledger.
-func OpenLedger(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 }

@@ -50,9 +50,12 @@ type RunConfig struct {
 	CacheDir     string
 	Protocol     *Protocol
 	ProtocolSHA  string
-	Warmup       int
-	RunID        string
-	LogOutput    io.Writer
+	// ProtocolCommit is the HEAD commit at which the CLI found the protocol
+	// committed and unmodified (CommittedFile), recorded in the run file.
+	ProtocolCommit string
+	Warmup         int
+	RunID          string
+	LogOutput      io.Writer
 }
 
 // Validate enforces the protocol constraints before anything runs.
@@ -129,7 +132,7 @@ func runCorpus(ctx context.Context, cfg RunConfig, corpus *LoadedCorpus) (*RunFi
 	env := map[string]string{"SEMANTIC_ENABLED": "false"}
 	run := &RunFile{
 		Format: RunFormat, Version: FormatVersion, RunID: cfg.RunID, Mode: cfg.Mode, Model: cfg.Model,
-		Corpus: corpus.Name, CorpusSHA256: corpus.SHA256, ProtocolSHA256: cfg.ProtocolSHA, Concurrency: 1,
+		Corpus: corpus.Name, CorpusSHA256: corpus.SHA256, ProtocolSHA256: cfg.ProtocolSHA, ProtocolCommit: cfg.ProtocolCommit, Concurrency: 1,
 		Warmup: []float64{},
 	}
 	var sidecar *SidecarProxy
@@ -187,14 +190,13 @@ func runCorpus(ctx context.Context, cfg RunConfig, corpus *LoadedCorpus) (*RunFi
 		if err != nil {
 			return nil, err
 		}
-		var ledger io.Writer
+		var ledger *Ledger
 		if cfg.JevLive {
-			file, err := OpenLedger(filepath.Join(cfg.CacheDir, "jev-ledger.jsonl"))
+			ledger, err = OpenLedger(filepath.Join(cfg.CacheDir, "jev-ledger.jsonl"))
 			if err != nil {
 				return nil, err
 			}
-			closers = append(closers, func() { _ = file.Close() })
-			ledger = file
+			closers = append(closers, func() { _ = ledger.Close() })
 		}
 		judge, err = newJevProxy(JevProxyConfig{
 			Live: cfg.JevLive, Upstream: cfg.JevUpstream, Key: cfg.JevKey, Cache: cache, Budget: cfg.Budget,
@@ -274,7 +276,7 @@ func runCorpus(ctx context.Context, cfg RunConfig, corpus *LoadedCorpus) (*RunFi
 		seen := trace.end()
 		result := CaseResult{ID: item.ID, Lang: item.Lang, InputType: item.InputType, Label: item.Label, LatencyMS: elapsed,
 			ModelMS: seen.modelMS, ModelCalls: seen.modelCalls, JudgeCalls: seen.judgeCalls, JudgeProb: seen.judgeProb,
-			JudgeMS: seen.judgeMS, JudgeTokens: seen.tokens, JudgeCache: seen.judgeCache}
+			JudgeMS: seen.judgeMS, JudgeTokens: seen.tokens, JudgeUnknownUSD: seen.unknownUSD, JudgeCache: seen.judgeCache}
 		if len(seen.scores) > 0 {
 			best := seen.scores[0]
 			for _, score := range seen.scores[1:] {

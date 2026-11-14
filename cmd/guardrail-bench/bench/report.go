@@ -32,24 +32,27 @@ const (
 
 // Row is one configuration on one corpus slice.
 type Row struct {
-	Config         string   `json:"config"`
-	Component      string   `json:"component"`
-	Model          string   `json:"model,omitempty"`
-	Threshold      *float64 `json:"threshold,omitempty"`
-	Corpus         string   `json:"corpus"`
-	Slice          string   `json:"slice"`
-	RunID          string   `json:"run_id"`
-	Counts         Counts   `json:"counts"`
-	Recall         Rate     `json:"recall"`
-	FPR            Rate     `json:"fpr"`
-	LatencyKind    string   `json:"latency_kind"`
-	Latency        Latency  `json:"latency_e2e"`
-	ModelLatency   Latency  `json:"latency_model_upstream"`
-	JudgeLatency   Latency  `json:"latency_judge_upstream"`
-	JudgeFraction  *Rate    `json:"judge_fraction,omitempty"` // requests routed to the judge / all requests
-	JudgeAnswered  int      `json:"judge_answered,omitempty"` // routed requests that got a judge answer
-	JudgeTokens    int64    `json:"judge_input_tokens,omitempty"`
-	USDPer1000     *float64 `json:"usd_per_1000_requests,omitempty"`
+	Config        string   `json:"config"`
+	Component     string   `json:"component"`
+	Model         string   `json:"model,omitempty"`
+	Threshold     *float64 `json:"threshold,omitempty"`
+	Corpus        string   `json:"corpus"`
+	Slice         string   `json:"slice"`
+	RunID         string   `json:"run_id"`
+	Counts        Counts   `json:"counts"`
+	Recall        Rate     `json:"recall"`
+	FPR           Rate     `json:"fpr"`
+	LatencyKind   string   `json:"latency_kind"`
+	Latency       Latency  `json:"latency_e2e"`
+	ModelLatency  Latency  `json:"latency_model_upstream"`
+	JudgeLatency  Latency  `json:"latency_judge_upstream"`
+	JudgeFraction *Rate    `json:"judge_fraction,omitempty"` // requests routed to the judge / all requests
+	JudgeAnswered int      `json:"judge_answered,omitempty"` // routed requests that got a judge answer
+	JudgeTokens   int64    `json:"judge_input_tokens,omitempty"`
+	USDPer1000    *float64 `json:"usd_per_1000_requests,omitempty"` // billed tokens only
+	// UnknownUSD is the worst case kept as spent for attempts of unknown
+	// billing, published apart from the billed cost.
+	UnknownUSD     float64  `json:"judge_unknown_billing_usd,omitempty"`
 	ErrorKinds     []string `json:"error_kinds,omitempty"`
 	ErrorsPositive int      `json:"errors_on_positives"`
 	ErrorsNegative int      `json:"errors_on_negatives"`
@@ -59,9 +62,11 @@ type Row struct {
 
 // PaidUsage summarizes the real judge traffic of the bundle.
 type PaidUsage struct {
-	Calls       int      `json:"upstream_calls"`
-	InputTokens int64    `json:"input_tokens"`
-	CostUSD     float64  `json:"cost_usd"`
+	Calls       int     `json:"upstream_calls"`
+	InputTokens int64   `json:"input_tokens"`
+	CostUSD     float64 `json:"cost_usd"`
+	// UnknownUSD is the worst case kept as spent for attempts of unknown billing.
+	UnknownUSD  float64  `json:"unknown_billing_usd"`
 	BodyBytes   int64    `json:"body_bytes"`
 	Refused     int      `json:"refused"`
 	Egress      int      `json:"egress_blocked"`
@@ -151,10 +156,18 @@ func Report(bundle *Bundle, protocol *Protocol, protocolSHA string, corpora map[
 			return nil, err
 		}
 		results.Checks = append(results.Checks, checks...)
+		if run.Corpus != CorpusCalibration {
+			commit := "not recorded by this run (run-bench.sh checked it)"
+			if run.ProtocolCommit != "" {
+				commit = "committed at " + run.ProtocolCommit
+			}
+			results.Checks = append(results.Checks, fmt.Sprintf("%s: protocol %s", run.RunID, commit))
+		}
 		if run.Judge != nil && run.Jev != nil && run.Jev.ProxyMode == "live" {
 			results.Paid.Calls += run.Judge.Upstream
 			results.Paid.InputTokens += run.Judge.InputTokens
 			results.Paid.CostUSD += run.Judge.CostUSD
+			results.Paid.UnknownUSD += run.Judge.UnknownBillingUSD
 			results.Paid.BodyBytes += run.Judge.BodyBytes
 			results.Paid.Refused += run.Judge.Refused
 			results.Paid.Egress += run.Judge.EgressBlocked
@@ -181,9 +194,15 @@ func Report(bundle *Bundle, protocol *Protocol, protocolSHA string, corpora map[
 						current[item.ID] = detected(component, item)
 					}
 				}
+				// Repeated runs of one configuration (replay and warm cache) must
+				// answer the same cases the same way: one of them is not allowed
+				// to replace the paired comparison of another.
 				if previous, ok := decisions[config]; ok {
+					if len(previous) != len(current) {
+						return nil, fmt.Errorf("config %s: run %s answered %d cases, an earlier run %d", config, run.RunID, len(current), len(previous))
+					}
 					for id, value := range current {
-						if previous[id] != value {
+						if earlier, ok := previous[id]; !ok || earlier != value {
 							return nil, fmt.Errorf("config %s: run %s disagrees with an earlier run on case %s", config, run.RunID, id)
 						}
 					}
@@ -368,6 +387,7 @@ func buildRow(run *RunFile, component, config, slice string) Row {
 		if item.JudgeCalls > 0 {
 			routed++
 			tokens += item.JudgeTokens
+			row.UnknownUSD += item.JudgeUnknownUSD
 			if item.JudgeCache == "hit" || item.JudgeCache == "live" {
 				row.JudgeAnswered++
 			}
@@ -414,8 +434,10 @@ func buildRow(run *RunFile, component, config, slice string) Row {
 }
 
 // consistency checks that a run's decisions follow from its own records:
-// the classifier decision is score >= threshold outside the gray zone and the
-// union decision is BLOCKED exactly when a detector fired.
+// the classifier decision is score >= threshold outside the gray zone, a judged
+// case has one recorded probability and its decision is probability >= the
+// frozen judge threshold, the judge mode judges every case, and the union
+// decision is BLOCKED exactly when a detector fired.
 func consistency(run *RunFile) ([]string, error) {
 	var notes []string
 	for _, item := range run.Cases {
@@ -431,6 +453,17 @@ func consistency(run *RunFile) ([]string, error) {
 			}
 			if (*item.Score >= *run.SemanticThreshold) != item.Semantic {
 				return nil, fmt.Errorf("run %s case %s: semantic decision differs from score >= threshold", run.RunID, item.ID)
+			}
+		}
+		if run.Mode == ModeJudge && item.JudgeCalls == 0 {
+			return nil, fmt.Errorf("run %s case %s: the judge mode did not judge the case", run.RunID, item.ID)
+		}
+		if run.Mode.usesJudge() && item.JudgeCalls > 0 {
+			if run.Jev == nil || item.JudgeCalls != 1 || item.JudgeProb == nil {
+				return nil, fmt.Errorf("run %s case %s: judged without exactly one recorded probability", run.RunID, item.ID)
+			}
+			if (*item.JudgeProb >= run.Jev.Threshold) != item.Semantic {
+				return nil, fmt.Errorf("run %s case %s: judge decision differs from probability >= threshold", run.RunID, item.ID)
 			}
 		}
 		if run.Mode == ModeCascade && item.Score != nil && run.Zone != nil {

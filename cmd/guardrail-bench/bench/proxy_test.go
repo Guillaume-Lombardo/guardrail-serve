@@ -75,9 +75,13 @@ func newTestJevProxy(t *testing.T, upstream *httptest.Server, live bool, budget 
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := JevProxyConfig{Live: live, Upstream: upstream.URL + "/v1/systemone", Cache: cache, Budget: budget, Ledger: ledger, Client: upstream.Client()}
+	cfg := JevProxyConfig{Live: live, Upstream: upstream.URL + "/v1/systemone", Cache: cache, Budget: budget, Client: upstream.Client()}
 	if live {
 		cfg.Key = []byte(testKey)
+		if ledger == nil {
+			ledger = io.Discard
+		}
+		cfg.Ledger = &Ledger{w: ledger}
 	}
 	proxy, err := newJevProxy(cfg, &tracer{})
 	if err != nil {
@@ -282,7 +286,7 @@ func TestJevProxyForwardsAndCachesOnlyTheReducedAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := newJevProxy(JevProxyConfig{Live: true, Key: []byte(testKey), Upstream: upstream.URL + "/v1/systemone", Cache: cache, Budget: DefaultBudget, Client: upstream.Client()}, &tracer{})
+	proxy, err := newJevProxy(JevProxyConfig{Live: true, Key: []byte(testKey), Upstream: upstream.URL + "/v1/systemone", Cache: cache, Budget: DefaultBudget, Ledger: &Ledger{w: io.Discard}, Client: upstream.Client()}, &tracer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,4 +386,116 @@ func grepDir(t *testing.T, dir, needle string) bool {
 		t.Fatal(err)
 	}
 	return found
+}
+
+func TestJevBudgetIsCumulativeOverTheLedger(t *testing.T) {
+	fake := &fakeJev{}
+	upstream := httptest.NewServer(fake)
+	defer upstream.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jev-ledger.jsonl")
+	budget := Budget{MaxCalls: 1, MaxUSD: 1, StopAfter: 2}
+	for i, text := range []string{"first run", "second run"} {
+		ledger, err := OpenLedger(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cache, err := NewCache(filepath.Join(dir, "cache"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		proxy, err := newJevProxy(JevProxyConfig{Live: true, Key: []byte(testKey), Upstream: upstream.URL + "/v1/systemone", Cache: cache, Budget: budget, Ledger: ledger, Client: upstream.Client()}, &tracer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := post(t, proxy, "/v1/systemone", judgeBody(t, text))
+		want := map[int]int{0: http.StatusOK, 1: http.StatusServiceUnavailable}[i]
+		if response.Code != want {
+			t.Fatalf("%s: status %d, want %d", text, response.Code, want)
+		}
+		if err := ledger.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fake.calls.Load() != 1 {
+		t.Fatalf("a new run reset the cumulative call cap: %d upstream calls", fake.calls.Load())
+	}
+	ledger, err := OpenLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	if prior := ledger.Prior(); prior.Calls != 1 || prior.SpentUSD != CostUSD(321) {
+		t.Fatalf("prior spend %+v", prior)
+	}
+}
+
+func TestJevLedgerIsExclusiveAndRefusesUnreadableLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jev-ledger.jsonl")
+	held, err := OpenLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenLedger(path); err == nil {
+		t.Fatal("two processes could spend against the same ledger")
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{\"cost_usd\":0.5}\nnot json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenLedger(path); err == nil {
+		t.Fatal("an unreadable past spend was counted as zero")
+	}
+	if _, err := newJevProxy(JevProxyConfig{Live: true, Key: []byte(testKey), Cache: &Cache{dir: t.TempDir()}, Budget: DefaultBudget}, &tracer{}); err == nil {
+		t.Fatal("live mode without the durable ledger was accepted")
+	}
+}
+
+func TestJevProxyChargesTheCaseForBilledErrors(t *testing.T) {
+	// A billed answer the proxy refuses (wrong question) still costs its tokens.
+	fake := &fakeJev{body: `{"model":"jev-1.14.0","answers":{"other":{"type":"noul","noul":0.8}},"usage":{"input_tokens":321,"output_tokens":1}}`}
+	upstream := httptest.NewServer(fake)
+	defer upstream.Close()
+	proxy := newTestJevProxy(t, upstream, true, DefaultBudget, nil)
+	proxy.trace.begin()
+	if response := post(t, proxy, "/v1/systemone", judgeBody(t, "a")); response.Code != http.StatusBadGateway {
+		t.Fatalf("status %d", response.Code)
+	}
+	if seen := proxy.trace.end(); seen.tokens != 321 || seen.unknownUSD != 0 {
+		t.Fatalf("billed error trace %+v", seen)
+	}
+	upstream.Close() // now the outcome of an attempt is unknown
+	proxy.trace.begin()
+	if response := post(t, proxy, "/v1/systemone", judgeBody(t, "b")); response.Code != http.StatusBadGateway {
+		t.Fatalf("status %d", response.Code)
+	}
+	if seen := proxy.trace.end(); seen.tokens != 0 || seen.unknownUSD != WorstCaseUSD() {
+		t.Fatalf("unknown billing trace %+v", seen)
+	}
+}
+
+func TestJevProxyReducesCachedEntriesAgain(t *testing.T) {
+	upstream := httptest.NewServer(&fakeJev{})
+	defer upstream.Close()
+	proxy := newTestJevProxy(t, upstream, false, Budget{}, nil)
+	put := func(text, answer string) []byte {
+		body := judgeBody(t, text)
+		entry := map[string]any{"model": "jev-1.14.0", "answers": map[string]json.RawMessage{"prompt_injection": json.RawMessage(answer)},
+			"usage": map[string]int64{"input_tokens": 12, "output_tokens": 1, "echoed_tokens": 3}, "upstream_ms": 1}
+		if err := proxy.cache.Put(JevKey(body), entry); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	old := put("old format", `{"type":"noul","noul":0.4,"explanation":"secret echo of the input"}`)
+	response := post(t, proxy, "/v1/systemone", old)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "secret echo") || strings.Contains(response.Body.String(), "echoed_tokens") {
+		t.Fatalf("an earlier cache entry was forwarded unreduced: %d %s", response.Code, response.Body.String())
+	}
+	invalid := put("invalid", `{"type":"noul","noul":3}`)
+	if response := post(t, proxy, "/v1/systemone", invalid); response.Code != http.StatusBadGateway {
+		t.Fatalf("an invalid cache entry was forwarded: %d", response.Code)
+	}
 }

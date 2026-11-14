@@ -62,11 +62,13 @@ type ProbeResult struct {
 	CostUSD     float64
 }
 
-// ProbeJev sends one noul request for model through a live proxy capped at one
-// call, so the ledger and the budget apply as for the bench itself.
+// ProbeJev sends one noul request for model through a live proxy, so it makes
+// at most one paid call and the ledger and the cumulative budget apply as for
+// the bench itself.
 func ProbeJev(ctx context.Context, cfg JevProxyConfig, model string) (ProbeResult, error) {
+	// One request is sent below, at most one paid call; the caps stay cumulative.
 	cfg.Live = true
-	cfg.Budget = Budget{MaxCalls: 1, MaxUSD: 0.01, StopAfter: 1}
+	cfg.Budget = DefaultBudget
 	proxy, err := newJevProxy(cfg, &tracer{})
 	if err != nil {
 		return ProbeResult{}, err

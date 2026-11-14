@@ -75,6 +75,7 @@ type caseTrace struct {
 	judgeProb  *float64
 	judgeMS    float64
 	tokens     int64
+	unknownUSD float64
 	judgeCache string
 }
 

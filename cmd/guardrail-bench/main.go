@@ -106,6 +106,12 @@ func runCommand(ctx context.Context, args []string, stdout io.Writer) error {
 			return err
 		}
 		cfg.Protocol, cfg.ProtocolSHA = protocol, sha
+		if *corpus != bench.CorpusCalibration {
+			// Measuring after calibration needs the protocol frozen in Git.
+			if cfg.ProtocolCommit, err = bench.CommittedFile(*protocolPath); err != nil {
+				return err
+			}
+		}
 	}
 	if parsedMode == bench.ModeUnion || parsedMode == bench.ModeCascade {
 		cfg.Threshold = bench.DefaultThreshold
@@ -271,6 +277,9 @@ func exportCommand(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if _, err := bench.CommittedFile(*protocolPath); err != nil {
+		return err
+	}
 	bundle := bench.Bundle{Format: bench.BundleFormat, Version: bench.FormatVersion, ProtocolSHA256: sha}
 	for _, path := range flags.Args() {
 		run, _, err := readRun(path)
@@ -304,6 +313,9 @@ func reportCommand(args []string, stdout io.Writer) error {
 	}
 	protocol, sha, err := loadProtocol(*protocolPath)
 	if err != nil {
+		return err
+	}
+	if _, err := bench.CommittedFile(*protocolPath); err != nil {
 		return err
 	}
 	var bundle bench.Bundle

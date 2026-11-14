@@ -27,7 +27,9 @@ guardrail-bench jev-probe  -jev-key-file /dev/fd/3 [-model jev-1.14.0]
   (`-replay-delay` sleeps the recorded upstream latency). Test runs take their
   threshold from the protocol (`-threshold frozen`, or `current` = 0.9 for `pg2-86m`).
 - `judge` runs on `bench-test` only. `-jev-live` allows paid calls, capped by
-  `-max-calls` (200) and `-max-usd` (1); the key is read from `-jev-key-file`, for
+  `-max-calls` (200) and `-max-usd` (1). The caps are cumulative over the ledger: a new
+  run, or a new process, starts from what `jev-ledger.jsonl` already records, the
+  ledger is locked while a proxy uses it, and a line it cannot read refuses it. The key is read from `-jev-key-file`, for
   example `/dev/fd/3`, never from an argument or the environment. Without `-jev-live`
   the proxy is cache-only. The settings must equal the protocol's frozen judge question
   (`jev-1.14.0`, `noul`, threshold 0.7, timeout 10s, fail closed).
@@ -36,15 +38,23 @@ guardrail-bench jev-probe  -jev-key-file /dev/fd/3 [-model jev-1.14.0]
   5xx, unreadable answer, invalid usage) keeps that worst case as spent. It stops on a
   401, after two consecutive 402/429, at the call or dollar cap, and when the API serves
   another model version than the one requested. Every attempt appends one text-free
-  line to `jev-ledger.jsonl` in the cache directory. Answers are reduced to the asked
-  question's `noul` probability before they are cached or forwarded.
+  line to `jev-ledger.jsonl` in the cache directory, and charges its case (billed tokens,
+  or the worst case when the billing is unknown, published apart). Answers are reduced
+  to the asked question's `noul` probability before they are cached or forwarded, and
+  a cached answer is reduced again when read (an entry that does not fit is an error).
 - `jev-models` (read-only, unbilled) lists the served names, which are aliases
-  (`jev-latest`, `jev-preview`); `jev-probe` sends one capped call on a fixed benign
-  text to check that a versioned name is served.
+  (`jev-latest`, `jev-preview`); `jev-probe` sends one call on a fixed benign text,
+  under the same ledger and cumulative caps, to check that a versioned name is served.
 - `cascade` replays both caches: no inference and no paid call.
+- `run` (on any corpus but calibration), `export` and `report` refuse a protocol file
+  that is not committed in Git or differs from its committed version; `run` records the
+  commit in the run file.
 - `report` loads the canonical corpora from `-root` and refuses a run that does not
   hold every case of its corpus exactly once, with the corpus labels, languages and
-  file hash, or whose threshold, zone or judge settings are not the frozen ones.
+  file hash, or whose threshold, zone or judge settings are not the frozen ones. It also
+  refuses a judged case without exactly one recorded probability or whose decision is
+  not probability >= the frozen threshold, and repeated runs of one configuration that
+  do not answer the same cases the same way.
 
 Errors (non-200 answers of the service, including fail-closed judge or classifier
 failures and egress-guard refusals) are counted apart and never as detections.

@@ -127,7 +127,10 @@ type CaseResult struct {
 	JudgeProb    *float64 `json:"judge_probability,omitempty"`
 	JudgeMS      float64  `json:"judge_ms,omitempty"`
 	JudgeTokens  int64    `json:"judge_input_tokens,omitempty"`
-	JudgeCache   string   `json:"judge_cache,omitempty"`
+	// JudgeUnknownUSD is the worst case kept as spent for this case's paid
+	// attempts whose billing is unknown.
+	JudgeUnknownUSD float64 `json:"judge_unknown_billing_usd,omitempty"`
+	JudgeCache      string  `json:"judge_cache,omitempty"`
 }
 
 // Status values of a case.
@@ -146,6 +149,7 @@ type RunFile struct {
 	Corpus            string         `json:"corpus"`
 	CorpusSHA256      string         `json:"corpus_sha256"`
 	ProtocolSHA256    string         `json:"protocol_sha256,omitempty"`
+	ProtocolCommit    string         `json:"protocol_commit,omitempty"`
 	SemanticThreshold *float64       `json:"semantic_threshold,omitempty"`
 	Zone              *Zone          `json:"zone,omitempty"`
 	Jev               *JevSettings   `json:"jev,omitempty"`

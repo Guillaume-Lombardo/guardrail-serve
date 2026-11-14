@@ -31,7 +31,7 @@ Built with Llama.
   rules (38.8%) for 2/80 false positives, but at p50 2.9 s per request on 2 vCPUs.
   Recalibrated 86M (threshold 0.9975), 22M, ProtectAI DeBERTa v2 and Qualifire Sentinel
   find no more than the current chain once their threshold keeps calibration false
-  positives within budget (16 to 17 of 80 with the rules).
+  positives within budget (13 to 17 of 80 with the rules).
 - Decision rule D1 (frozen before the test run): **rules + judge**, **rules +
   cascade** and **rules + Qwen3Guard** pass (test FPR at most 4/80 counting errors on
   benign texts as false positives, recall at least 20/80). Rules + judge passes at the
@@ -41,8 +41,10 @@ Built with Llama.
 ### Protocol
 
 Frozen in [`bench/results/protocol.json`](bench/results/protocol.json) (sha256
-`46076199654a…79fb3f`), committed before the first test run. The report refuses any
-run measured under another protocol, on another corpus version, with missing,
+`46076199654a…79fb3f`), committed before the first test run. The `run` (after
+calibration), `export` and `report` commands refuse a protocol that is not committed
+or differs from its committed version, and new runs record that commit. The report
+refuses any run measured under another protocol, on another corpus version, with missing,
 repeated or relabelled cases, or with another threshold, zone or judge setting.
 
 | Step | Rule |
@@ -166,7 +168,7 @@ measures the service only.
 | | Calls | Input tokens | USD |
 | --- | ---: | ---: | ---: |
 | Estimate recorded before any paid call (`.agents/plan.md`) | 160 | about 100,000 | about 0.004 |
-| Pre-call bound (64k tokens per call, caps 200 calls / USD 1) | at most 200 | | at most 0.54 |
+| Pre-call bound (64k tokens per call, caps of 200 calls / USD 1 cumulative over the ledger) | at most 200 | | at most 0.54 |
 | Real: model probe (16:56) | 1 | 339 | 0.000014 |
 | Real: judge on `bench-test` (17:40 to 17:41) | 159 | 72,372 | 0.003040 |
 | Real: cascade (cache only) | 0 | 0 | 0 |

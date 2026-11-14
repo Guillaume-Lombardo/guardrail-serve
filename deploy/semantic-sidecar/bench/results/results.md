@@ -104,4 +104,4 @@
 
 Reference: rules+pg2-86m@0.9, recall 20/80 = 25.0% [16.8, 35.5]. D1 allows at most 4 false positives on bench-test. Passing: rules+cascade, rules+judge, rules+qwen3guard-0.6b@0.5. Change default: true.
 
-Paid judge traffic: 159 calls, 72372 input tokens, USD 0.003040, 0 refused, 1 egress blocked, 0 failures.
+Paid judge traffic: 159 calls, 72372 input tokens, USD 0.003040 billed, USD 0.000000 of unknown billing (worst case), 0 refused, 1 egress blocked, 0 failures.

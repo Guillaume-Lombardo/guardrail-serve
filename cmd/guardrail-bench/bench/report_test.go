@@ -27,7 +27,8 @@ func testRun(id string, mode Mode, model string, threshold float64, decide func(
 			item.Score = &score
 		}
 		if mode == ModeJudge {
-			item.JudgeCalls, item.JudgeTokens = 1, 1000
+			probability := map[bool]float64{true: 0.9, false: 0.1}[semantic]
+			item.JudgeCalls, item.JudgeTokens, item.JudgeProb = 1, 1000, &probability
 		}
 		run.Cases = append(run.Cases, item)
 	}
@@ -180,4 +181,54 @@ func TestJudgeUseAndCostCountEveryRequest(t *testing.T) {
 		t.Fatalf("judge use %+v, tokens %d", row.JudgeFraction, row.JudgeTokens)
 	}
 	near(t, "USD per 1000 requests", *row.USDPer1000, 1000*CostUSD(1000))
+}
+
+func TestReportRefusesJudgeDecisionsThatDoNotFollowTheProbability(t *testing.T) {
+	reference := testRun("ref", ModeUnion, CascadePrimary, 0.9, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	low := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, i == 0, 0 })
+	probability := 0.01 // below the frozen 0.7, yet recorded as a detection
+	low.Cases[0].JudgeProb = &probability
+	missing := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
+	missing.Cases[3].JudgeProb = nil
+	unjudged := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
+	unjudged.Cases[4].JudgeCalls, unjudged.Cases[4].JudgeProb = 0, nil
+	for name, run := range map[string]RunFile{"low probability": low, "missing probability": missing, "unjudged case": unjudged} {
+		if _, err := report(reference, run); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+}
+
+func TestReportRefusesRepeatedRunsWithAnotherCoverage(t *testing.T) {
+	reference := testRun("ref", ModeUnion, CascadePrimary, 0.9, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	judge := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, i < 9, 0 })
+	failed := testRun("judge-again", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
+	for i := range failed.Cases {
+		failed.Cases[i].Status, failed.Cases[i].ErrorKind, failed.Cases[i].Decision = StatusError, "http_502", ""
+	}
+	// Otherwise the failed repetition would replace the paired comparison of the first run.
+	if _, err := report(reference, judge, failed); err == nil || !strings.Contains(err.Error(), "answered") {
+		t.Fatalf("a repetition covering other cases was accepted: %v", err)
+	}
+	if _, err := report(reference, judge, judgeCopy(judge, "judge-same")); err != nil {
+		t.Fatalf("an identical repetition was refused: %v", err)
+	}
+}
+
+func judgeCopy(run RunFile, id string) RunFile {
+	run.RunID = id
+	run.Cases = append([]CaseResult(nil), run.Cases...)
+	return run
+}
+
+func TestUnknownBillingIsPublishedApart(t *testing.T) {
+	judge := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
+	judge.Cases[0].Status, judge.Cases[0].ErrorKind, judge.Cases[0].Decision, judge.Cases[0].JudgeTokens = StatusError, "http_502", "", 0
+	judge.Cases[0].JudgeUnknownUSD = WorstCaseUSD()
+	row := buildRow(&judge, ComponentJudge, ComponentJudge, "all")
+	near(t, "unknown billing", row.UnknownUSD, WorstCaseUSD())
+	near(t, "billed USD per 1000 requests", *row.USDPer1000, 29*CostUSD(1000)/30*1000)
+	if !strings.Contains(Markdown(&Results{Rows: []Row{row}}), "unknown billing") {
+		t.Fatal("the Markdown table hides the unknown billing")
+	}
 }

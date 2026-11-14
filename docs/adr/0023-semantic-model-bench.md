@@ -40,7 +40,8 @@ can trust and rebuild:
    answers by sha256 of the exact masked request body (model version, question and
    fixed instructions included), so the judge alone and the cascade share one answer per
    text. Judge answers are reduced to the asked question's `noul` probability (any other
-   upstream field is dropped) before they are cached or forwarded. Caches live outside
+   upstream field is dropped) before they are cached or forwarded, and again when a
+   cached answer is read. Caches live outside
    Git (`~/.cache/guardrail-bench`) and hold scores, reduced answers and timings, never
    text.
 3. **The real key never reaches the service.** The service holds a placeholder key and
@@ -51,18 +52,22 @@ can trust and rebuild:
    phone, IPv4, provider tokens, private keys, password assignments) and refuses to send
    a match: the case becomes an error, never a detection.
 4. **Budget enforced before each paid call.** Cache-only mode cannot call upstream at
-   all. Live mode caps calls (200) and cumulative cost (USD 1) and reserves the worst
+   all. Live mode caps calls (200) and cost (USD 1) cumulatively over a durable,
+   locked ledger, so neither a rerun nor a second process resets them, and reserves the worst
    case of the next call (the documented 64k-token request maximum: billed tokens include
    a server-side overhead, so the body size is no bound) before sending. An attempt whose
    billing cannot be known (transport failure, 5xx, unreadable answer, invalid usage)
    keeps that worst case as spent. It stops on 401, after two consecutive 402/429, and
    when the API serves another model version than the requested one, and appends a
-   text-free ledger line per attempt.
+   text-free ledger line per attempt; billed tokens and unknown-billing reservations are
+   charged to their case even when the answer is an error.
 5. **Protocol frozen from calibration, then enforced.** `calibrate` applies R1 (lowest
    threshold keeping rules ∪ model calibration false positives ≤ floor(5% × negatives),
    inclusive `>=`; model-alone fallback when the rules alone exceed it) and R2 (gray zone
    [L, U], U = the 86M R1 threshold, at most 25% of calibration texts inside, inclusive)
-   and writes `protocol.json`, committed before any test run. Test runs read thresholds
+   and writes `protocol.json`, committed before any test run; the CLI refuses a protocol
+   that is not committed or differs from its committed version and records the commit
+   in each new run. Test runs read thresholds
    and zone from that file and refuse others (except 0.9, the current default, for the
    86M model); the judge refuses every corpus but `bench-test`; run files carry the
    protocol sha256 and the report refuses runs measured under another protocol.
