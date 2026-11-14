@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file maps project delivery skills to the active collaborative plan in `plan.md` and clarifies when each skill should be applied.
+This file maps project delivery skills to the active collaborative plan in `.agents/plan.md` and clarifies when each skill should be applied.
 
 ## Core Skills (Project Local)
 
@@ -21,7 +21,7 @@ This file maps project delivery skills to the active collaborative plan in `plan
 
 ## Skill Usage by Plan
 
-- Use `plan.md` as the source of truth for the current initiative.
+- Use `.agents/plan.md` as the source of truth for the current initiative.
 - Select the smallest set of skills that covers the validated scope.
 - Revisit skill selection when scope changes during user feedback.
 

@@ -30,7 +30,7 @@
 
 ## Docs/Config sync
 
-- [ ] `README.md` updated (if needed)
+- [ ] `README.md` and `docs/*.md` updated (if needed)
 - [ ] `.env.template` updated (if needed)
 
 ## Validation

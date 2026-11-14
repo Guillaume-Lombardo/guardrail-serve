@@ -7,11 +7,10 @@ Build and maintain a robust Go service and library that exposes deterministic an
 This repository is in migration from the archived Python reference implementation in `archive/python-reference` to a native Go implementation.
 
 The active delivery tooling includes:
-- agent governance (`agent.md`)
-- collaborative planning workspace (`plan.md`)
+- agent governance (`.agents/agent.md`)
+- collaborative planning workspace (`.agents/plan.md`)
 - reusable project skills (`skills/*`)
-- workflow index (`SKILLS.md`)
-- project intent (`SOUL.md`)
+- workflow index (`.agents/SKILLS.md`)
 
 ## Working Rules
 - Use English as the default language for README, code comments, docs, ADRs, and core project artifacts.
@@ -35,7 +34,7 @@ The active delivery tooling includes:
 
 ## Delivery Workflow
 - Implement each run, phase, and feature in a dedicated branch created for that specific scope.
-- Before substantial implementation, run a short planning exchange with the user and write the validated plan in `plan.md`.
+- Before substantial implementation, run a short planning exchange with the user and write the validated plan in `.agents/plan.md`.
 - All future work after repository bootstrap must start by creating or switching to a dedicated non-`main` branch.
 - Do not develop features directly on the main branch.
 - End every run, phase, and feature delivery with a GitHub Pull Request.
@@ -48,7 +47,7 @@ The active delivery tooling includes:
 - Evaluate review comments for technical relevance; address pertinent comments in code/tests/docs and explicitly justify non-pertinent comments in PR discussion.
 - Before each push/PR, run one explicit dead-code pass and remove unused code/paths/imports no longer referenced.
 - Before every push/PR, ensure docs/config bootstrap are synchronized with code changes:
-  - update `README.md` when API behavior, setup, or workflow changes
+  - update `README.md` when setup, purpose or headline results change, and the matching page in `docs/` (`api.md`, `operations.md`, `detectors.md`, `evaluation.md`) when API behavior, configuration or detectors change
   - update `.env.template` when environment variables change
   - update local `.env` accordingly for validation runs
 - Before implementation and before merge, review and respect engineering guidance in:
@@ -67,7 +66,7 @@ Run locally:
 - `pre-commit run --all-files`
 - Run a dead-code cleanup pass (remove unused code, stale helpers, and obsolete branches).
 - Confirm documentation/config sync:
-  - `README.md` updated if behavior changed
+  - `README.md` and `docs/*.md` updated if behavior changed
   - `.env.template` updated if env contract changed
   - local `.env` updated for manual/e2e validation
   - `docs/adr/*` updated when architecture decisions changed

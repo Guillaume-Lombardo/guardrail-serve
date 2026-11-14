@@ -16,5 +16,5 @@ description: Prepare and validate the Go service release workflow for tags, bina
 ## Notes
 
 - Keep the release footprint minimal and reproducible.
-- Document public contract changes in `README.md`.
+- Document public contract changes in `README.md` and `docs/api.md`.
 - Do not include `archive/` artifacts in release scope.

@@ -15,7 +15,7 @@ Design a maintainable Go architecture with clear contracts and low coupling.
 2. Define or update typed contracts first (domain types, interfaces, request/response schemas).
 3. Choose simple abstractions before adding polymorphism.
 4. Decouple domain logic, orchestration, transport, and provider adapters.
-5. Record architecture tradeoffs in `plan.md` and `docs/adr/`.
+5. Record architecture tradeoffs in `.agents/plan.md` and `docs/adr/`.
 
 ## Mandatory Decisions
 
