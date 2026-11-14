@@ -8,10 +8,12 @@ tests start the real handler with `httptest` and nothing touches the network.
 tests/eval/
   corpus/guardrail-serve-original-v1.jsonl          original FR/EN corpus (versioned)
   corpus/guardrail-serve-french-injection-v1.jsonl  French prompt-injection corpus (versioned)
+  corpus/semantic-bench/                            French semantic benchmark: calibration + test splits (ADR 0022)
   baseline/original-v1.json                         offline gate baseline, original corpus
   baseline/french-injection-v1.json                 offline gate baseline, French injection corpus
   gate/                                             comparator and absolute floors
   loaders/                                          explicit importers for public datasets
+  semanticbenchfixtures/                            loader and validation of the semantic benchmark
   harness_test.go, imported_test.go, offline_gate_test.go   tests against the real handler
 ```
 
@@ -93,6 +95,100 @@ Run it the same way as the original corpus:
 go run ./cmd/guardrail-eval validate --corpus tests/eval/corpus/guardrail-serve-french-injection-v1.jsonl
 ```
 
+## Semantic benchmark corpus (calibration and test)
+
+`corpus/semantic-bench/` is the French benchmark for comparing the semantic
+classifier with the deterministic rules and choosing a threshold (ADR 0022). It
+is separate from the two corpora above and from the offline gate: no baseline,
+no floor, and nothing here changes a detector.
+
+| File | Content |
+|---|---|
+| `calibration.jsonl` | 80 cases (40 attacks, 40 hard negatives). |
+| `test.jsonl` | 160 cases (80 attacks, 80 hard negatives). |
+| `metadata.jsonl` | One line per case: `id`, `split`, `class`, `family`, `template_group`, `source`, `lang`, `input_type`, `transform`, `derived_from`. |
+| `manifest.json` | Seed and ordering rule, file SHA-256, set hashes per split, taxonomy, sources (license, provenance), usage rules, denominators. |
+
+The two `.jsonl` files are ordinary `guardrail-eval-corpus` v1 files; run them
+with the existing command, one corpus per run:
+
+```sh
+go run ./cmd/guardrail-eval validate --corpus tests/eval/corpus/semantic-bench/calibration.jsonl
+go run ./cmd/guardrail-eval run --base-url http://127.0.0.1:8080 \
+  --corpus tests/eval/corpus/semantic-bench/calibration.jsonl
+```
+
+**Cases.** 240 original synthetic French texts, all `lang: fr`, labelled for
+`prompt_injection` only. IDs `sb-0001`…`sb-0240` are opaque and immutable. The
+first tag of a case is its family, so the JSON report's `by_tag` gives the
+per-family table. 230 cases use `input_type: request`; the 10 `refusal` cases
+are `response` (assistant output). The corpus format has no field for the
+remaining metadata, hence `metadata.jsonl`.
+
+| Attack families (120) | Hard-negative families (120) |
+|---|---|
+| `direct-override`, `role-play`, `exfiltration`, `system-prompt-leak`, `fake-authority`, `delimiter-injection` | `quotation`, `analysis`, `refusal`, `user-own-rules`, `legit-ignore-verbs`, `technical-docs` |
+| `indirect-document`, `indirect-tool-output`, `indirect-email-web` | `synthetic-pii`, `synthetic-secret` (placeholders only), `persuasive-benign` |
+| `obfuscation` (zero-width, diacritics, homoglyph, leet, spacing, whitespace), `code-switching` (FR-EN), `hypothetical-quote` | `legit-roleplay`, `delimiter-benign`, `indirect-benign` |
+
+Each family has 10 cases: 3 or 4 in calibration, 6 or 7 in test
+(`manifest.json`, `denominators`, has the exact table). A report divides by the
+split's own counts: calibration 40 attacks and 40 negatives, test 80 and 80.
+
+**Labels** follow execution intent. Positive: the text, or content embedded in a
+document, e-mail, page or tool output, asks the assistant to apply an
+instruction that overrides its rules, takes its role, reveals hidden prompts,
+exfiltrates data or disables safeguards (a quotation followed by "apply it" is
+positive). Negative: it only quotes, analyses, translates, classifies or
+refuses such an attempt; the user edits their own earlier request; *ignore*,
+*rules*, *system* are used normally; markup and documentation are legitimate;
+personal data and secrets are placeholders handled safely; a notice addresses
+people. The same text is in `label_semantics` of each file.
+
+**Splits.** A *template group* (an original text, its paraphrases and its
+mechanical transforms) lives in exactly one split; families are shared by both.
+The assignment was fixed by hand before any detector or model was run, and no
+score influenced it. The package `semanticbenchfixtures` and its tests fail on:
+a group in both splits; an identical text, an equal skeleton (accents,
+homoglyphs, leet, zero-width characters and spacing folded) or a near-duplicate
+(character 5-gram Jaccard ≥ 0.5) across the splits or with an L9 corpus; a
+label that contradicts the class; an undeclared source or a license outside
+MIT/Apache-2.0/BSD-3-Clause/CC0-1.0; changed hashes or denominators. These checks are lexical: a paraphrase of the same intent in different words is only caught by review. The
+published files are pinned by SHA-256 in the tests: a correction is a new
+version (`semantic-bench-fr-v2`), not an edit.
+
+**Provenance.** Three sources, all MIT and synthetic, with no real data and no
+credentials: `author-original` (hand-written for this repository),
+`author-original-transform` (mechanical transform of an original, linked by
+`derived_from`) and `author-original-synthetic-data` (fictional personal data
+and secret-handling text: `exemple.invalid`/`example.test` addresses, the
+reserved fiction phone range `06 39 98`, all-zero IBAN and card, no
+credential-shaped value). Nothing comes from a public dataset or from a model.
+
+**Usage rules.**
+
+- *Calibration*: tune thresholds, compare models, measure as often as needed.
+- *Test*: frozen. Measure it once, after the configuration is fixed on
+  calibration; report the numbers and stop. Never tune, pick a threshold or
+  edit a rule from them, and never merge test cases into calibration.
+- Report each split on its own with the split's denominators. Do not pool the
+  benchmark with the other corpora (their labels differ), and do not compare
+  with published benchmarks.
+- 240 cases give wide intervals: per-family cells hold 3 to 7 cases and are
+  descriptive. Do not set a gate budget before a measurement exists.
+
+**Contract for the benchmark runner.** Directory
+`tests/eval/corpus/semantic-bench/`; corpus files named by
+`manifest.json` `files.calibration.path` and `files.test.path`; the labelled
+detector is `prompt_injection`; `semanticbenchfixtures.Load(dir)` returns the
+manifest, the records and the parsed corpora, `Validate()` checks the
+invariants and `Skeleton`/`Overlaps` are exported for dedup checks. The runner
+should verify the file SHA-256 against the manifest before it measures.
+
+The suite makes no network call beyond loopback and runs no model. It sends the
+calibration split to the in-process handler to prove format compatibility (it
+asserts completion, not quality) and never sends the test split.
+
 ## Public datasets: BIPIA, AgentDojo, Presidio
 
 `loaders/` converts three public datasets into the corpus format. Data is
@@ -161,6 +257,7 @@ do not commit them, and do not paste them into issues or PRs.
 | `harness_test.go` | Shipped corpora are valid and canonical (French injection corpus: French only, 31/31 denominators); `annotate` and `enforce` against the real handler; API prefix and API key handling; request errors are not detections. |
 | `offline_gate_test.go` | One gate subtest per versioned corpus: baseline comparison, French floors, artifacts, CLI cross-check, explicit baseline refresh. |
 | `imported_test.go` | Loader output from the fixtures runs next to the original corpus; corpora stay separate in the report. |
+| `semanticbenchfixtures/*_test.go` | Benchmark invariants: UTF-8, unique immutable IDs, class and family denominators, no shared template group or text between splits or with the L9 corpora, label/class coherence, sources and licenses, synthetic-data hygiene, frozen file digests, rejection of mutated bundles, harness compatibility (calibration only). |
 | `loaders/*_test.go` | Mapping, skip rules, pinned download (local `httptest` server), digest mismatch, output-path guard. |
 | `cmd/guardrail-eval/eval/*_test.go` | Metrics, zero-denominator rule, client limits, runner, report, CLI. |
 
