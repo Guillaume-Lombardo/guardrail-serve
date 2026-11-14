@@ -191,7 +191,7 @@ Transport limits are independent of text limits:
 | --- | --- | --- |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time to read request headers |
 | `HTTP_READ_TIMEOUT` | `15s` | Time to read the complete request, including its body |
-| `HTTP_WRITE_TIMEOUT` | `30s` | Response write deadline; also the request deadline that cancels pending detector calls |
+| `HTTP_WRITE_TIMEOUT` | `30s` | Response write deadline; also the request deadline (from arrival) that cancels pending detector calls |
 | `HTTP_IDLE_TIMEOUT` | `60s` | Keep-alive idle deadline |
 | `HTTP_SHUTDOWN_TIMEOUT` | `10s` | Graceful drain deadline after SIGTERM or SIGINT |
 | `HTTP_MAX_BODY_BYTES` | `1048576` | Maximum encoded request body size in bytes |
@@ -676,13 +676,13 @@ not guarantee that no personal data leaves.
 | `SYSTEMONE_THRESHOLD` | `0.7` | Probability in (0, 1]; equality triggers. Starting point from the Noul docs, not calibrated |
 | `SYSTEMONE_ZONE_LOWER` / `SYSTEMONE_ZONE_UPPER` | empty | Required in `cascade`; in [0, 1], lower <= upper, inclusive |
 | `SYSTEMONE_TIMEOUT` | `3s` | Per text; texts are judged one after another and in cascade each also waits for `SEMANTIC_TIMEOUT`. `HTTP_WRITE_TIMEOUT` bounds the whole request and cancels pending calls |
-| `SYSTEMONE_FAILURE_MODE` | `closed` | Provider failures only. `closed`: 502; `open`: the text passes and `semantic classifier degraded` is logged. Masking and size failures, and cancellation, always fail |
+| `SYSTEMONE_FAILURE_MODE` | `closed` | Provider failures only. `closed`: 502; `open`: the text passes and `semantic classifier degraded` is logged. Input-provoked failures (masking, size, provider 400/413/422 `rejected_input`) and cancellation always fail |
 | `SYSTEMONE_MAX_TEXT_RUNES` | `20000` | Larger masked texts fail without being sent |
 
 The key is sent only as `Authorization: Bearer` to the configured host: no
 redirect is followed, environment proxies are ignored, and caller headers are
 never forwarded. Errors and logs carry a failure kind (`unauthorized`,
-`payment_required`, `rate_limited`, `overloaded`, `timeout`, `masking_failed`,
+`payment_required`, `rate_limited`, `overloaded`, `rejected_input`, `timeout`, `masking_failed`,
 `invalid_probability`, ...) and at most a status code. There is no retry.
 
 **Cost and limits** (primary sources, read 14/11/2026): USD 0.042 per million

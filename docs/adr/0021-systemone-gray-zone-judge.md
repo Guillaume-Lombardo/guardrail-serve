@@ -83,7 +83,9 @@ detector, so the judge cannot recurse. If masking fails (detector error, invalid
 UTF-8, cancellation) or the masked text exceeds `SYSTEMONE_MAX_TEXT_RUNES`, no
 HTTP request is made and the detection fails in either failure mode. These
 failures are provoked by the input (for example a literal U+FFFD rejected by the
-detectors), so `SYSTEMONE_FAILURE_MODE=open` applies only to provider failures:
+detectors), so `SYSTEMONE_FAILURE_MODE=open` applies only to provider failures,
+and a provider rejection of the input (400, 413, 422, `rejected_input`) also
+always fails:
 otherwise a caller could turn the judge off with crafted text and, in cascade,
 replace a primary result inside the zone with a degraded pass. Findings are still reported on the
 original text (whole-text span), so original positions are preserved.
@@ -134,8 +136,8 @@ failures, the code only: never text, headers, keys, URLs or response bodies.
   disabled by default; no change to the offline default service, domain contracts,
   scan routes or LiteLLM contract.
 - Negatives: one more external dependency, a paid one, with its own latency
-  (per text, sequential, after the primary call; `HTTP_WRITE_TIMEOUT` is the
-  request deadline that cancels pending calls) and rate
+  (per text, sequential, after the primary call; `HTTP_WRITE_TIMEOUT`, counted from
+  request arrival, is the request deadline that cancels pending calls) and rate
   limits. No credit balance endpoint exists, so a 402 is only seen at call time.
 - Risks: masking covers what the secret and PII detectors cover (native secret
   rules and entropy, email (ASCII and Unicode), French phone numbers, IBAN, IPv4, payment cards, NIR,

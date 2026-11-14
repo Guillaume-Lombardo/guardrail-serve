@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/g1lom/guardrail-serve/internal/config"
 )
@@ -22,6 +23,10 @@ func runtimeHandler(cfg config.Config, next http.Handler) http.Handler {
 		keys[i] = sha256.Sum256([]byte(key))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The request deadline starts on arrival, like the server write deadline,
+		// so a slowly sent body cannot let detector calls (including paid ones)
+		// start or keep running once the response can no longer be delivered.
+		deadline := time.Now().Add(cfg.Runtime.WriteTimeout)
 		health := r.Method == http.MethodGet && r.URL.Path == cfg.APIPrefix+"/health/"
 		if len(keys) > 0 && !health {
 			token, valid := requestKey(r)
@@ -67,9 +72,7 @@ func runtimeHandler(cfg config.Config, next http.Handler) http.Handler {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
-		// Past the write deadline the response can no longer be delivered, so
-		// detector calls (including paid ones) are cancelled rather than left running.
-		ctx, cancel := context.WithTimeout(r.Context(), cfg.Runtime.WriteTimeout)
+		ctx, cancel := context.WithDeadline(r.Context(), deadline)
 		defer cancel()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

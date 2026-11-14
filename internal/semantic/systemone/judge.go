@@ -157,11 +157,11 @@ func (j *Judge) judge(ctx context.Context, text string) (probability float64, fa
 
 // fail applies the failure mode to provider failures only. Cancellation is
 // always an error (nobody is waiting), and so are failures the input itself
-// provokes before sending (masking, size): fail-open is for an unavailable
+// provokes (masking, size, a provider rejection): fail-open is for an unavailable
 // provider, it must not let a caller turn the judge off with crafted text.
 func (j *Judge) fail(failure *Error) (semantic.PromptInjectionAssessment, error) {
 	switch failure.Kind {
-	case FailureCanceled, FailureMasking, FailureTextTooLarge:
+	case FailureCanceled, FailureMasking, FailureTextTooLarge, FailureRejected:
 		return semantic.PromptInjectionAssessment{}, failure
 	}
 	if j.cfg.failureMode == httpclassifier.FailClosed {

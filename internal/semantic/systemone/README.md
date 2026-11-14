@@ -51,13 +51,13 @@ built, and a masking error sends nothing. The app supplies an internal
   `[REDACTED]` through `fmt`, `slog` and text marshalling.
 - Failures are `*Error` values whose message is the kind (and status code for
   HTTP errors): `unauthorized`, `payment_required`, `rate_limited`, `overloaded`,
-  `status`, `timeout`, `canceled`, `transport`, `masking_failed`,
+  `rejected_input` (400, 413, 422), `status`, `timeout`, `canceled`, `transport`, `masking_failed`,
   `text_too_large`, `response_too_large`, `invalid_response`,
   `invalid_probability`. `FailClosed` returns them; `FailOpen` returns a degraded
   assessment (`classifier_degraded=true`) for provider failures only.
-  `canceled`, `masking_failed` and `text_too_large` are always errors: the last
-  two are provoked by the input, and fail-open must not let crafted text
-  disable the judge.
+  `canceled`, `masking_failed`, `text_too_large` and `rejected_input` are always
+  errors: the last three are provoked by the input, and fail-open must not let
+  crafted text disable the judge.
 
 ## Cascade
 

@@ -32,6 +32,9 @@ const (
 	FailureRateLimited Outcome = "rate_limited"
 	// FailureOverloaded: HTTP 529.
 	FailureOverloaded Outcome = "overloaded"
+	// FailureRejected: HTTP 400, 413 or 422, the provider rejected this input.
+	// Always returned as an error, like the other input-provoked failures.
+	FailureRejected Outcome = "rejected_input"
 	// FailureStatus: any other non-2xx status.
 	FailureStatus Outcome = "status"
 	// FailureResponseTooLarge: the response body exceeds the limit.
@@ -47,7 +50,7 @@ func Outcomes() []Outcome {
 	return []Outcome{
 		OutcomeSuccess, FailureCanceled, FailureTimeout, FailureTransport, FailureMasking,
 		FailureTextTooLarge, FailureUnauthorized, FailurePaymentRequired, FailureRateLimited,
-		FailureOverloaded, FailureStatus, FailureResponseTooLarge, FailureInvalidResponse,
+		FailureOverloaded, FailureRejected, FailureStatus, FailureResponseTooLarge, FailureInvalidResponse,
 		FailureInvalidProbability,
 	}
 }
@@ -85,6 +88,8 @@ func statusError(status int) *Error {
 		kind = FailureRateLimited
 	case 529:
 		kind = FailureOverloaded
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		kind = FailureRejected
 	}
 	return &Error{Kind: kind, Status: status}
 }

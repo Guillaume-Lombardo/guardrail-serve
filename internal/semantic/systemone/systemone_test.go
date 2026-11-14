@@ -352,7 +352,9 @@ func TestStatusAndBodyFailures(t *testing.T) {
 		{"429", statusResponder(429), FailureRateLimited, 429},
 		{"529", statusResponder(529), FailureOverloaded, 529},
 		{"500", statusResponder(500), FailureStatus, 500},
-		{"422", statusResponder(422), FailureStatus, 422},
+		{"400", statusResponder(400), FailureRejected, 400},
+		{"413", statusResponder(413), FailureRejected, 413},
+		{"422", statusResponder(422), FailureRejected, 422},
 		{"too large declared", func(w http.ResponseWriter, _ *http.Request, _ []byte) { _, _ = io.WriteString(w, big) }, FailureResponseTooLarge, 0},
 		{"too large chunked", func(w http.ResponseWriter, _ *http.Request, _ []byte) {
 			_, _ = io.WriteString(w, big[:100])
@@ -375,6 +377,21 @@ func TestStatusAndBodyFailures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestProviderRejectionIgnoresFailOpen checks that a status the input provokes
+// (400, 413, 422) is an error even in open mode, while an unavailable provider
+// degrades as configured.
+func TestProviderRejectionIgnoresFailOpen(t *testing.T) {
+	for status, degraded := range map[int]bool{400: false, 413: false, 422: false, 503: true, 429: true} {
+		api := newFakeAPI(t, statusResponder(status))
+		cfg := testConfig(api.server.URL)
+		cfg.FailureMode = httpclassifier.FailOpen
+		assessment, err := newTestJudge(t, cfg, &upperMasker{}, nil).DetectPromptInjection(context.Background(), []string{"text"})
+		if got, _ := assessment.Metadata["classifier_degraded"].(bool); got != degraded || (err == nil) != degraded {
+			t.Fatalf("%d: %+v %v", status, assessment, err)
+		}
 	}
 }
 
