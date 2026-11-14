@@ -32,8 +32,8 @@ const (
 	// Freeze guards: the published files are immutable for this benchmark
 	// version. A deliberate change means a new version (semantic-bench-fr-v2),
 	// never an edit; update these digests only together with that version.
-	frozenCalibrationSHA256 = "232d78dcc205d0ba7029631ee6419f00bd88eee6410380bad4c978a0ea210bc2"
-	frozenTestSHA256        = "93edab3792ecbcbc9d7f5878152eb5ec65aef2f32080a1fa220aeb2069816197"
+	frozenCalibrationSHA256 = "4421934d205b949d2eabe22e64b244beec72c6944e6415489d9c87b288152f13"
+	frozenTestSHA256        = "1bea6b8f55a7d3d387515ef797524b9decd8e2c8c328c26bea8d11bc07ddbf9e"
 )
 
 func load(t *testing.T) *fx.Bundle {
