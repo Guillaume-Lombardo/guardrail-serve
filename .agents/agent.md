@@ -23,7 +23,7 @@ Deliver high-quality, maintainable increments for a Go guardrail service and its
 - Surface assumptions explicitly when requirements are incomplete.
 - Prefer small, testable increments.
 - Keep docs, skills, and plan synchronized with implementation.
-- Before non-trivial implementation, write the agreed plan in `plan.md`.
+- Before non-trivial implementation, write the agreed plan in `.agents/plan.md`.
 - Never commit files from `archive/`; treat them as migration reference only.
 - After repository bootstrap, never implement on `main`; all subsequent work must happen on a dedicated feature branch.
 - For each PR, monitor CI and review by polling every 60 seconds until:
@@ -44,7 +44,7 @@ A feature is done only if:
 - dead code pass is completed and unused code is removed
 - docs/plan updates are applied when architecture or behavior changes
 - `docs/adr/*` is updated when architecture decisions are introduced or revised
-- `README.md` is synchronized with user-facing behavior and commands
+- `README.md` and `docs/*.md` are synchronized with user-facing behavior and commands
 - `.env.template` is synchronized with the environment variable contract
 - local `.env` is updated for validation before push/PR when relevant
 - modified code remains decoupled from transport/provider details

@@ -1,735 +1,137 @@
 # guardrail-serve
 
-Native Go service for serving LLM guardrails.
+A small Go service that checks LLM traffic before and after the model: it masks
+secrets and personal data, and blocks prompt injections. It plugs into
+[LiteLLM](https://docs.litellm.ai/docs/adding_provider/generic_guardrail_api)
+as a generic guardrail, or can be called directly over HTTP.
 
-The public HTTP contract is exposed through `huma`, so the registered Go request/response types are the source of truth for the generated OpenAPI document and Swagger UI.
+- **Deterministic first**: regex and validator rules embedded in a static binary,
+  sub-millisecond per request, no model or network needed.
+- **Explainable decisions**: `NONE`, `GUARDRAIL_INTERVENED` (texts masked) or
+  `BLOCKED`, with findings that point at the original text and never contain the
+  matched value.
+- **Configurable policies**: chains of detectors per stage (request / response),
+  in `enforce` or `detect` (audit) mode, loaded from YAML.
+- **Optional semantic layer**: a prompt-injection classifier
+  (Llama Prompt Guard 2) served by a separate CPU sidecar, and an external judge
+  (TypeSafe System One) for uncertain scores, called only on masked text. Both are
+  disabled by default.
 
-## Status
+## What it detects
 
-This repository is migrating from the archived Python reference implementation in `archive/python-reference` to a native Go implementation focused on lower latency, smaller images, and clearer operational boundaries.
+| Detector | Covers |
+| --- | --- |
+| `detect_secret` | 217 pinned gitleaks rules, keyword assignments, entropy |
+| `detect_pii` | email, phone, IBAN (MOD 97), payment card (Luhn), IP, French NIR/SIREN/SIRET |
+| `prompt_injection` | English and French instruction overrides, system-prompt disclosure, hostile tool use |
+| `max_length` | number of texts and total length |
+| `semantic_prompt_injection` | optional model-based injection score |
 
-`archive/` is reference material only and must never be committed as part of active delivery work.
+All detectors run on a normalized view of the text (NFKC, invisible characters
+removed), so full-width, ligature and zero-width tricks do not bypass them.
 
-## Current Target
+## Install
 
-The first Go implementation serves deterministic guardrails on:
+Requirements: Go 1.26 (see `go.mod`). Docker is optional.
 
-- `/scan/secrets`
-- `/scan/pii`
-- `/scan/prompt-injection`
-- `/v1/guardrails/{policy}`
-- `/beta/litellm_basic_guardrail_api`
-- `/docs`
-- `/openapi.json`
-- `/openapi.yaml`
+**From source**
 
-The decision contract is:
-
-- `NONE`
-- `BLOCKED`
-- `GUARDRAIL_INTERVENED`
-
-HTTP errors are returned as JSON with a `detail` field.
-Guardrail execution failures are returned as HTTP `502` with the stable JSON detail `Guardrail execution failed.`.
-
-Interactive Swagger UI is served on `/docs`.
-Generated OpenAPI is served on `/openapi.json` and `/openapi.yaml`.
-When `API_PREFIX` is configured, these routes are served under the same prefix.
-
-### Supported scopes
-
-The deterministic detectors `detect_secret`, `detect_pii` and
-`prompt_injection`, and the `max_length` payload limits, support both
-`request` and `response`. `input_type=request` evaluates a policy's `input`
-stage and `input_type=response` its `output` stage, on every route. With the
-`prompt_injection` policy, pre-call request texts and post-call response texts
-return `BLOCKED` when injection patterns match, and `NONE` for clean texts.
-Unknown scopes remain invalid (HTTP `422`).
-The optional semantic prompt-injection library guardrail remains request-only
-and is not registered by the HTTP server.
-
-### Route contracts
-
-All scan requests require at least one `texts` entry; `input_type` defaults to
-`request` and accepts `request` or `response`. `request_data` accepts arbitrary
-metadata, including LiteLLM `user_api_key_*` values, without evaluating it.
-
-`/scan/*` uses a strict schema: unknown fields and non-empty `images`, `tools`,
-`tool_calls`, and `structured_messages` are rejected. Responses retain
-`decision`, `texts`, `metadata`, and optional `reason`.
-
-`/scan/*` keep their historical behavior: each runs one fixed detector in
-enforce mode (secrets and PII masked with `SECRET_MASK`, prompt injection
-blocked) and policy files cannot change them.
-
-### Policies
-
-`POST /v1/guardrails/{policy}` evaluates a named policy. It uses the strict
-native schema: `texts` (at least one), optional `input_type`
-(`request` | `response`, default `request`) and opaque `request_data`; unknown
-fields return `422`. Unknown policies return `404` with
-`{"detail":"Unknown policy 'name'."}`.
-
-For `{"texts":["write to zoe@ex.fr"]}` on `/v1/guardrails/default`:
-
-```json
-{
-  "policy": "default", "mode": "enforce", "stage": "input",
-  "decision": "GUARDRAIL_INTERVENED", "policy_decision": "GUARDRAIL_INTERVENED",
-  "texts": ["write to [EMAIL]"],
-  "findings": [{"text_index": 0, "detector": "detect_pii", "type": "EMAIL",
-    "rule": "email", "start": 9, "end": 18, "action": "mask"}]
-}
-```
-
-`start` (inclusive) and `end` (exclusive) are Unicode code point offsets into
-the original text item `text_index`, even after masks change its length.
-Findings never contain the matched value, are sorted by `text_index`, `start`,
-`end`, chain position and rule, and `score` appears only for detectors that
-provide one. `reason` is a value-free explanation when `policy_decision` is
-`BLOCKED`.
-
-Policies are loaded at startup from the embedded
-`internal/resources/defaults/policies.yaml`, or from
-`GUARDRAILS_CONFIG_DIR/policies.yaml`, which replaces the embedded catalog
-entirely:
-
-```yaml
-version: 1
-policies:
-  - name: default
-    mode: enforce          # enforce | detect
-    stages:                # both stages required; [] applies only payload limits
-      input:               # ordered chain; each detector at most once
-        - detector: prompt_injection
-          action: block    # block | mask | annotate
-        - detector: detect_pii
-          action: mask
-          mask: "[{TYPE}]" # optional; default SECRET_MASK
-      output: []
-```
-
-- `block` returns `BLOCKED` with the original texts; `mask` replaces spans and
-  returns `GUARDRAIL_INTERVENED`; `annotate` only reports findings.
-- `detect` mode never changes texts and always returns `decision: NONE`;
-  `policy_decision`, `reason` and findings show what `enforce` would do.
-- Every detector reports spans in the original text (native deterministic
-  detectors match a normalized view). Overlapping masked spans merge into
-  one replacement using the mask of the earliest chain step; touching spans
-  merge only when they render the same mask.
-- `{TYPE}` in a mask expands to the finding type, such as `EMAIL`,
-  `PHONE_NUMBER`, `IBAN`, `IP_ADDRESS`, `CREDIT_CARD`, `PASSWORD`, `API_KEY`,
-  `SECRET`, `HIGH_ENTROPY_STRING` or `PROMPT_INJECTION`. Pattern files set it per rule with `type:`; rules
-  without it use `SECRET`, `PII` or `PROMPT_INJECTION`. `detect_secret` and
-  `detect_pii` rules must contain a `(?P<secret>...)` group.
-- Payload limits run first in every mode and block oversized payloads.
-- Unknown fields, modes, actions, stages or detectors, duplicates and
-  incomplete definitions fail startup with the file and position.
-
-Embedded policies: `detect_secret`, `detect_pii`, `prompt_injection`,
-`max_length` (limits only), `default` (input: block injections, mask secrets,
-typed PII masks; output: mask secrets and typed PII, annotate injections) and
-`audit` (the same chains in detect mode). See
-[ADR 0007](docs/adr/0007-policy-engine-and-findings.md).
-
-### LiteLLM route
-
-`/beta/litellm_basic_guardrail_api` implements the
-[LiteLLM Generic Guardrail API](https://docs.litellm.ai/docs/adding_provider/generic_guardrail_api).
-It accepts `litellm_call_id`, `litellm_trace_id`, `litellm_version`,
-`request_headers`, and `additional_provider_specific_params`, and ignores unknown
-fields. `additional_provider_specific_params.policy` selects the evaluated
-policy; when that key is absent, `LITELLM_DEFAULT_POLICY` applies. A `policy`
-value that is not a non-empty string, or names an unknown policy, returns
-`400` instead of passing the request through. Other parameters, `request_data`
-and forwarded headers are opaque: they do not select policies, authenticate
-callers, or change guardrail settings. In the LiteLLM guardrail definition,
-set the policy next to the other `litellm_params`:
-
-```yaml
-- guardrail_name: guardrail-serve
-  litellm_params:
-    guardrail: generic_guardrail_api
-    api_base: http://guardrail-serve:8000
-    additional_provider_specific_params:
-      policy: default
-```
-
-The LiteLLM route accepts `images`, `tools`, `tool_calls`, and
-`structured_messages` without evaluating or rewriting them. Only extracted
-`texts` are scanned; callers must not treat this endpoint as image, tool, or
-structured-message protection. Requests without text items remain invalid.
-
-LiteLLM responses use `action` (`NONE`, `BLOCKED`, or `GUARDRAIL_INTERVENED`),
-`blocked_reason` when blocked, and `texts` in the same order and count as input,
-including unchanged entries when another entry is redacted. For example:
-
-```json
-{"action":"GUARDRAIL_INTERVENED","texts":["hello","password=[REDACTED]"]}
-```
-
-The LiteLLM response does not expose `decision`, `metadata` or findings. A
-policy in detect mode returns `NONE` with unchanged texts.
-
-Requests reaching the API return an `X-Request-ID` header. Client IDs are reused only when they contain 1–128 ASCII letters, digits, dots, underscores or hyphens (`[A-Za-z0-9._-]`); otherwise an ID is generated. Logged User-Agent values are limited to 256 bytes of valid UTF-8. The server caps headers at 32 KiB (net/http adds a small parser allowance); larger headers receive HTTP `431`.
-
-## Runtime configuration
-
-`LITELLM_DEFAULT_POLICY` (default `detect_secret`) names the policy used by the
-LiteLLM route when the request selects none. The legacy
-`LITELLM_GUARDRAIL_NAME` is read when `LITELLM_DEFAULT_POLICY` is empty; its
-historical values are embedded policy names. An undefined policy fails startup.
-`GUARDRAILS_CONFIG_DIR` overrides `policies.yaml` and the pattern files.
-
-`MAX_TEXT_ITEMS` (default `20`) limits text entries. `MAX_TEXT_CHARS` (default
-`20000`) counts Unicode code points (runes) across all entries, including combining
-marks separately. Invalid or non-positive text limits use these defaults.
-
-Transport limits are independent of text limits:
-
-| Environment variable | Default | Meaning |
-| --- | --- | --- |
-| `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time to read request headers |
-| `HTTP_READ_TIMEOUT` | `15s` | Time to read the complete request, including its body |
-| `HTTP_WRITE_TIMEOUT` | `30s` | Response write deadline; also the request deadline (from arrival) that cancels pending detector calls |
-| `HTTP_IDLE_TIMEOUT` | `60s` | Keep-alive idle deadline |
-| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | Graceful drain deadline after SIGTERM or SIGINT |
-| `HTTP_MAX_BODY_BYTES` | `1048576` | Maximum encoded request body size in bytes |
-| `HTTP_MAX_CONCURRENT_REQUESTS` | `2` | Maximum admitted requests, excluding health |
-| `GUARDRAIL_API_KEYS` | empty | Optional comma-separated API keys |
-
-Timeouts accept positive Go durations such as `500ms` or `30s`; invalid,
-non-positive or overflowing settings fail startup. The body limit must be a
-positive integer from `1` to `1048576`, inclusive. The transport middleware owns this ceiling. Oversized requests return HTTP `413`,
-including bodies with unknown content length. Body read failures return `400`.
-`HTTP_MAX_CONCURRENT_REQUESTS` must be a positive integer; invalid, non-positive
-or overflowing values fail startup. Admission is nonblocking, after authentication
-and before body reading or parsing. Saturation returns `503` with
-`{"detail":"Service busy."}` and `Retry-After: 1`; missing credentials still
-return `401`. Health bypasses admission and body buffering.
-Malformed 1 MiB JSON can use roughly 120 MiB during schema validation in measured
-cases. The default of 2 limits simultaneous expensive requests, not total process
-memory: allow roughly 240 MiB for those cases plus baseline, GC and operational
-headroom, and size this setting against the deployment memory budget. This is an
-observed amplification, not a proven worst-case heap bound.
-On shutdown the server stops accepting connections, drains active requests, then
-closes remaining connections when the deadline expires.
-
-An unset or empty `GUARDRAIL_API_KEYS` preserves unauthenticated access. When set,
-all routes (including docs and OpenAPI) require either `Authorization: Bearer <key>`
-or `X-API-Key: <key>`. Only `GET <API_PREFIX>/health/` is exempt. Keys are trimmed
-when loaded; empty comma-separated entries and whitespace inside keys fail startup.
-Multiple credential headers, including using both header forms, are rejected with
-`401`. Keys are hashed and compared in constant time across the whole configured
-set, and never included in authentication errors or logs. Use TLS at the ingress
-and provide keys through the environment, never a committed configuration file.
-
-## Container
-
-The repository ships a multi-stage `Dockerfile` that builds a small, static, non-root image
-(see `docs/adr/0012-container-image.md`).
-
-```bash
-docker build -t guardrail-serve .
-docker run --rm -p 127.0.0.1:8000:8000 guardrail-serve
+```sh
+git clone https://github.com/Guillaume-Lombardo/guardrail-serve.git
+cd guardrail-serve
+cp .env.template .env            # adjust if needed; every setting has a default
+set -a; . ./.env; set +a         # the binary reads the environment, not .env
+go run ./cmd/guardrail-serve
 curl http://127.0.0.1:8000/health/
 ```
 
-- **Build**: Go toolchain image pinned by tag and digest (it must match the `go` directive of
-  `go.mod`), `CGO_ENABLED=0`, `-trimpath -buildvcs=false -ldflags="-s -w"`. The default policies and
-  patterns are embedded in the binary, so no resource file is copied separately.
-- **Runtime**: `gcr.io/distroless/static-debian13:nonroot` (pinned by digest) with CA certificates,
-  no shell and no package manager. The process runs as `65532:65532` from the read-only, root-owned
-  `/app/guardrail-serve` and writes nothing to disk.
-- **Port**: the service listens on `API_PORT` (default `8000`, `EXPOSE 8000`). Publish it on the
-  interface you intend to serve; keep `GUARDRAIL_API_KEYS` set when it is reachable by others.
-- **Configuration**: every setting described in [Runtime configuration](#runtime-configuration)
-  is an environment variable (`docker run -e LOG_FORMAT=json -e GUARDRAIL_API_KEYS=...`).
-  `GUARDRAILS_CONFIG_DIR` must point to a directory mounted into the container and readable by
-  uid `65532` (for example `-v ./config:/config:ro -e GUARDRAILS_CONFIG_DIR=/config`). Pass secrets
-  through the orchestrator's secret mechanism, never bake them into the image.
-- **Health**: `GET <API_PREFIX>/health/` returns `200 {"status":"ok"}` and is exempt from API-key
-  authentication. The image has no `HEALTHCHECK` instruction because it contains no shell or curl:
-  configure the probe in the orchestrator (Kubernetes `httpGet`, load balancer check, or an HTTP
-  probe from a sidecar or auxiliary container).
-- **Signals**: the binary is PID 1 through an exec-form `ENTRYPOINT` and handles `SIGTERM` and
-  `SIGINT` itself: it stops accepting connections and drains requests for up to
-  `HTTP_SHUTDOWN_TIMEOUT` (default `10s`). Set the orchestrator's stop grace period above that value
-  (`docker stop -t 15`).
-- **CI**: `.github/workflows/container.yml` builds the image on pull requests without pushing it;
-  it needs no registry credentials. Publishing is out of scope for now.
+**With Docker**
 
-## Logging
+```sh
+docker build -t guardrail-serve .
+docker run --rm -p 127.0.0.1:8000:8000 -e GUARDRAIL_API_KEYS=change-me guardrail-serve
+```
 
-Logging uses the Go stdlib `log/slog` stack.
+The image is static, distroless and non-root. Set `GUARDRAIL_API_KEYS` as soon as
+the service is reachable by others.
 
-- `LOG_FORMAT=human` emits readable text logs for local development and operator inspection
-- `LOG_FORMAT=json` emits structured JSON logs for export pipelines and machine processing
+**Try it**
 
-Request logs include contextual fields such as request id, method, path, guardrail or policy, input type, decision, finding count, status code, and duration. Texts, findings and matched values are never logged.
+```sh
+curl -s http://127.0.0.1:8000/v1/guardrails/default \
+  -H 'Content-Type: application/json' \
+  -d '{"texts":["write to zoe@ex.fr"]}'
+# -> "decision": "GUARDRAIL_INTERVENED", "texts": ["write to [EMAIL]"]
+```
 
-## Development Workflow
+Swagger UI is on `/docs`, the OpenAPI document on `/openapi.json` and `/openapi.yaml`.
 
-```bash
+**Use it from LiteLLM**
+
+```yaml
+guardrails:
+  - guardrail_name: guardrail-serve
+    litellm_params:
+      guardrail: generic_guardrail_api
+      mode: [pre_call, post_call]
+      api_base: http://guardrail-serve:8000
+      additional_provider_specific_params:
+        policy: default
+```
+
+**Optional semantic sidecar**: see [`deploy/semantic-sidecar`](deploy/semantic-sidecar/README.md).
+It needs your own Hugging Face access to the gated Prompt Guard 2 model, or uses a
+public fallback model.
+
+## Results
+
+Measured with the offline evaluation gate (fixed corpora, real HTTP service) and,
+for the model, on the build host with 2 shared vCPUs. Details and protocol:
+[evaluation](docs/evaluation.md) and [sidecar evaluation](deploy/semantic-sidecar/EVALUATION.md).
+
+| Scope | Recall | False positives |
+| --- | ---: | ---: |
+| PII, original corpus (83 cases, FR + EN) | 100% | 6% |
+| Secrets, original corpus | 88 to 89% | 0 to 3% |
+| Prompt injection, original corpus | 100% | 0 to 3% |
+| Prompt injection, French corpus (62 cases), rules only | 93.5% | 3.2% |
+| Same, rules + Prompt Guard 2 86M | 96.8% | 16.1% |
+
+| Latency per request | p50 |
+| --- | ---: |
+| Deterministic detectors | ~0.3 ms |
+| Prompt Guard 2 86M sidecar (CPU) | +165 to 170 ms |
+
+The model adds little recall on French text for many more false positives, so the
+example policies keep it in `annotate` (report only) while the rules block.
+
+## Documentation
+
+| Topic | Where |
+| --- | --- |
+| Routes, policies, LiteLLM contract | [docs/api.md](docs/api.md) |
+| Configuration, container, logging, metrics | [docs/operations.md](docs/operations.md) |
+| How each detector works, semantic detector | [docs/detectors.md](docs/detectors.md) |
+| Evaluation gate and corpora | [docs/evaluation.md](docs/evaluation.md) |
+| Architecture decisions | [docs/adr](docs/adr/README.md) |
+| Contributing, agent workflow | [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), [.agents/](.agents/) |
+
+## Development
+
+```sh
 gofmt -w .
 go test ./...
-go test ./tests/integration/...
-go test ./tests/end2end/...
+go test ./tests/integration/... ./tests/end2end/...
+scripts/eval-offline.sh
 pre-commit run --all-files
 ```
 
-## Project Layout
+Layout: `cmd/` (service and evaluation CLI), `internal/` (domain, detectors,
+policy engine, HTTP API), `tests/` (unit, integration, end2end, eval),
+`deploy/` (semantic sidecar), `docs/`.
 
-- `cmd/guardrail-serve`: application entrypoint
-- `internal/app`: application wiring and HTTP server bootstrap
-- `internal/domain`: guardrail, detector, finding and policy enum contracts
-- `internal/guardrails`: built-in detectors and payload limits
-- `internal/policy`: policy schema, catalog and evaluation engine
-- `internal/httpapi`: HTTP handlers, routes, request/response schemas
-- `internal/config`: environment and runtime configuration
-- `internal/resources`: embedded YAML rule sets and loading helpers
-- `tests`: unit, integration, and end-to-end coverage
-- `docs`: engineering guides and ADR records (`docs/README.md`)
-- `skills`: AI helper skills for coding workflows
-- `agent.md`: AI agent role, principles, and delivery contract
-- `AGENTS.md`: operational guardrails and pre-PR checklist
-- `plan.md`: collaborative planning workspace
-- `SKILLS.md`: index of local skills and when to apply them
+## License
 
-## GitHub Bootstrap
-
-1. Initialize local git history.
-2. Create or connect the GitHub repository.
-3. Push the initial `main` branch.
-4. After bootstrap, do all further work on dedicated branches with PRs, CI, and review.
-
-### Normalized deterministic detection
-
-Native secret detection, PII and prompt-injection rules scan an NFKC view with zero-width and bidi
-formatting controls removed. English and French hostile instruction overrides,
-system-prompt disclosure and hostile tool use are covered by deterministic
-patterns; ordinary requests such as “list the tools I need to build a shed”
-pass. These patterns are bounded heuristics, not a semantic safety guarantee.
-Secret detection is unchanged.
-
-Matches map back to the original bytes through `internal/textnorm`; API findings
-use original rune offsets. Masks replace whole original grapheme clusters.
-Ligature expansions can produce overlapping findings, merged deterministically
-by the policy engine. Clean text, detect-mode text and annotated text retain
-all original characters, including formatting and decomposed accents.
-
-PII rules accept an optional `validator` field: `payment_card`, `iban`, `fr_nir`,
-`fr_siren`, or `fr_siret`; unknown validators fail startup. Embedded card rules
-require Luhn (12–19 digits), IBAN rules require registered country format and
-MOD 97, and French identifiers use the shared NIR/SIREN/SIRET validators.
-NIR/SIREN/SIRET require their contextual labels (NIR also accepts “sécurité
-sociale” and “numéro de sécurité sociale”) to avoid treating arbitrary numeric
-sequences as identifiers. A labeled French identifier is not also treated as a
-payment card. ASCII spaces/hyphens may separate identifier characters; NFKC
-also accepts compatibility spaces and digits. Invalid checksums are discarded.
-IPv4 literals remain detectable, except immediately after `version`, `release`,
-`ver`, or `v` with optional spacing and `:`, `=`, `-` separators. Card matches
-end at the last digit and preserve following spaces.
-
-Native secret, PII and injection library detectors reject invalid UTF-8 and U+FFFD with a value-free
-error, before returning any detections. JSON decoding replaces malformed UTF-8
-and unpaired UTF-16 surrogates with U+FFFD; these decoded texts therefore also
-fail closed through the existing detector-error HTTP 502 response, with the stable
-JSON detail
-`Guardrail execution failed.` and no texts, findings or input values
-([ADR 0007](docs/adr/0007-policy-engine-and-findings.md)). Literal U+FFFD is
-deliberately rejected too: after decoding,
-it cannot be distinguished from damaged input. Offsets always refer to valid
-original UTF-8, never to a repaired string. Policies that do not run a normalized
-detector retain their existing behavior. No admission/body/rune limit changes.
-See [ADR 0013](docs/adr/0013-normalized-detector-integration.md).
-## Prometheus metrics
-
-`GET /metrics` on the API listener (prefixed by `API_PREFIX`, if configured)
-exports Prometheus text metrics using `client_golang`. No extra port or environment
-variable is required. When API keys are configured, scrapes require the same
-`Authorization: Bearer ...` or `X-API-Key` header as scans. Only health is exempt
-from authentication and admission. Scrapes consume admission capacity and retain
-body limits and HTTP timeouts, so they can return 401, 413 or 503 under the same
-conditions as other requests. Configure the scraper's credentials accordingly.
-
-| Metric | Meaning |
-| --- | --- |
-| `guardrail_executions_total` | Completed policy evaluations and actual detector invocations |
-| `guardrail_execution_duration_seconds` | Duration histogram for those same executions, in seconds (default Prometheus buckets) |
-| `guardrail_systemone_routes_total{route}` | Cascade evaluations by deciding route: `judged`, `below_zone`, `above_zone`, `primary_failure`, `empty` |
-| `guardrail_systemone_judgments_total{outcome}` | System One judgments per text: `success` or a failure kind (`masking_failed` and `text_too_large` send nothing) |
-| `guardrail_systemone_judgment_duration_seconds{outcome}` | Judgment duration histogram, masking included |
-| `guardrail_systemone_input_tokens_total` | Billable input tokens reported by successful responses |
-
-The two execution metrics use labels `policy`, `mode`, `stage`, `detector`,
-`action`, `decision` and `outcome`; the System One metrics use only the fixed
-enumerations shown. `detector="none"` identifies a complete policy evaluation; its
-`action="none"` and `decision` is the applied `NONE`, `BLOCKED` or
-`GUARDRAIL_INTERVENED` (`none` on error). Detector series have `decision="none"`,
-configured action `mask`, `block` or `annotate`, and count once per text and chain
-step. `max_length` counts once per evaluation with action `block`; when it blocks,
-no chain detectors run. Outcomes are `clean`, `match` and `error`. A matching
-annotate/detect execution still reports a policy decision of `NONE`. These are
-execution counts, not numbers of findings or HTTP requests. Earlier successful
-steps remain counted if a later step fails. Cancellation and invalid spans are
-errors when returned by the executed detector. Policy latency includes limits,
-detectors and output processing; detector latency includes span validation.
-
-Each handler owns a fresh registry. Embedders can inject a caller-owned registry
-with `app.NewHandlerWithRegistry`; duplicate registrations return an error. No
-Prometheus global registry, process/Go collectors or scrape metrics are installed.
-Counters start when an execution completes, so unused series are absent. Health,
-scrapes, authentication/admission rejections, validation failures and unknown
-policies create no execution samples. This also prevents recursive scrape metrics.
-
-Policy and detector labels are bounded by the startup catalog and fixed scan
-policies; other labels are enums. Unexpected observer values collapse to
-`unknown`. No request text, matches, extracted rules/types, keys, request IDs,
-raw URLs or unknown user-selected policy names become labels. Cardinality grows
-only with operator-loaded policies and detector chains. See
-[ADR 0014](docs/adr/0014-prometheus-observation.md).
-
-## Evaluation
-
-Run the versioned FR/EN offline regression gate from the repository root:
-
-```sh
-scripts/eval-offline.sh
-```
-
-Provision the Go toolchain specified in `go.mod` and modules first (`go mod download`).
-Evaluation itself disables Go downloads, uses the real service over an ephemeral
-loopback HTTP listener, and requires no datasets, models, LLM, API key or `.env`.
-A request failure or regression produces a nonzero test/process exit status.
-
-The gate measures two versioned corpora, always separately (never pooled), and
-the separate Evaluation workflow uploads the artifacts from `.agent-tmp/eval/`:
-
-| Corpus | Baseline | Artifacts |
-|---|---|---|
-| `guardrail-serve-original-v1` (83 cases) | [`original-v1.json`](tests/eval/baseline/original-v1.json) | `current.json`, `gate.json` |
-| `guardrail-serve-french-injection-v1` (62 cases: 31 positives, 31 negatives) | [`french-injection-v1.json`](tests/eval/baseline/french-injection-v1.json) | `french-injection-v1.current.json`, `french-injection-v1.gate.json` |
-
-Each baseline pins the corpus hash and per-case detections; all known false
-positives/negatives remain visible by case ID. Metrics below are rounded for
-readability; gates use full precision.
-
-Original corpus (83 cases), as measured by the current baseline (after
-[ADR 0018](docs/adr/0018-french-injection-recall.md)):
-
-| Detector | Language | TP | FP | TN | FN | Precision | Recall | FPR |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| detect_pii | en | 8 | 2 | 34 | 0 | .800000 | 1 | .055556 |
-| detect_pii | fr | 5 | 2 | 31 | 0 | .714286 | 1 | .060606 |
-| detect_secret | en | 8 | 1 | 34 | 1 | .888889 | .888889 | .028571 |
-| detect_secret | fr | 7 | 0 | 31 | 1 | 1 | .875000 | 0 |
-| prompt_injection | en | 7 | 1 | 36 | 0 | .875000 | 1 | .027027 |
-| prompt_injection | fr | 6 | 0 | 33 | 0 | 1 | 1 | 0 |
-
-The six historical French injection cases are all detected (6/6) with no false
-positive.
-
-French prompt-injection corpus (62 cases, 31 positives and 31 negatives),
-`prompt_injection`/`fr`:
-
-| TP | FP | TN | FN | Recall | FPR |
-|---:|---:|---:|---:|---:|---:|
-| 29 | 1 | 30 | 2 | 93.5% | 3.2% |
-
-The two false negatives (`frinj-pos-030`, `frinj-pos-031`) and the false
-positive (`frinj-neg-011`) are kept as labelled known failures; see
-[`tests/eval/README.md`](tests/eval/README.md) for the corpus, the families and
-the failure analysis. On both corpora the gate also enforces absolute French
-floors for `prompt_injection`/`fr`: recall at least 85% and FPR at most 5%, both
-defined (ADR 0018). These are deterministic-rule results only; they say nothing
-about the optional semantic sidecar. Its separate measurements and limitations
-are documented in [`deploy/semantic-sidecar/EVALUATION.md`](deploy/semantic-sidecar/EVALUATION.md).
-
-For every detector total and detector/language group, precision/recall must be
-at least baseline and FPR at most baseline. Every previously correct case label
-must remain correct: an improvement cannot compensate for a regression elsewhere.
-Zero-denominator metrics use `defined: false` (no numeric bound); a previously
-defined metric must remain defined. Corpora are never pooled.
-
-To refresh after an improvement, run the old gate first, then:
-
-```sh
-GOPROXY=off GOTOOLCHAIN=local go test ./tests/eval \
-  -run '^TestOfflineRegressionGate$' -count=1 -update-eval-baseline
-```
-
-The refresh refuses regressions against the old baseline. Review and commit the
-old/new metrics and corrected case IDs as evidence; do not relax thresholds or
-edit corpus labels to get a pass. See [ADR 0015](docs/adr/0015-offline-regression-gate.md)
-and the [evaluation CLI documentation](cmd/guardrail-eval/README.md). Baseline refresh,
-floors and the corpus are described in [`tests/eval/README.md`](tests/eval/README.md) and
-[ADR 0018](docs/adr/0018-french-injection-recall.md).
-
-### Optional semantic policy detector (L6b)
-
-`semantic_prompt_injection` supports input and output policy stages. It is disabled
-by default; embedded policies and legacy `/scan` behavior are unchanged. Enable
-it explicitly and install [example policies](examples/semantic/policies/policies.yaml)
-via `GUARDRAILS_CONFIG_DIR`; set `LITELLM_DEFAULT_POLICY=semantic` if appropriate.
-A policy naming this detector while disabled fails startup as an unknown detector.
-
-| Environment | Default | Contract |
-| --- | --- | --- |
-| `SEMANTIC_ENABLED` | `false` | Boolean; register optional detector |
-| `SEMANTIC_URL` | empty | Required when enabled; static absolute HTTP(S) endpoint, no credentials/fragment |
-| `SEMANTIC_FORMAT` | `scores` | `scores` or `tei_predict` |
-| `SEMANTIC_TIMEOUT` | `2s` | Positive duration for one text, including all chunk batches |
-| `SEMANTIC_THRESHOLD` | `0.9` | Finite score in (0,1]; equality triggers |
-| `SEMANTIC_FAILURE_MODE` | `closed` | `open` or `closed` |
-| `SEMANTIC_MALICIOUS_LABELS` | `MALICIOUS` | Nonempty comma-separated TEI labels, case-insensitive (only `tei_predict`; Prompt Guard 2 checkpoints name their classes `LABEL_0`/`LABEL_1`, so use `LABEL_1`) |
-
-These settings are operator-only. Request metadata, forwarded headers and provider
-params never select URLs, credentials or thresholds. No sidecar auth forwarding
-is implemented. Config parsing/handler construction makes no network calls.
-
-For `scores`, POST `{"texts":["sample"]}` to the configured URL and return
-`{"scores":[0.92]}` (one finite attack probability per item in original order).
-For `tei_predict`, configure the full `/predict` URL; requests use
-`{"inputs":[["sample"]],"raw_scores":false,"truncate":false}` and responses use
-`[[{"label":"BENIGN","score":0.08},{"label":"MALICIOUS","score":0.92}]]`.
-Use labels from the actual checkpoint's id2label mapping, not guessed label IDs.
-The [L6a client contract](internal/semantic/httpclassifier/README.md) documents
-chunk/batch/response bounds and invalid-response behavior. Classification emits
-one finding per triggered original text, with its maximum score and whole-text
-rune span, fixed type `PROMPT_INJECTION` and rule `semantic_classification`.
-It cannot locate the malicious fragment. Enforce/block blocks; annotate reports
-findings without intervention; detect mode reports hypothetical actions unchanged.
-
-Fail-closed provider errors return **502** `{"detail":"Guardrail execution failed."}`
-without URLs, text, response bodies or secrets. Configure LiteLLM's own fail-closed
-handling to block on provider errors. Fail-open can return `NONE`; each degraded
-text evaluation emits a structured warning `semantic classifier degraded` with
-fixed `detector` and `failure_mode` fields. Alert on that warning. L8b detector
-metrics still record clean/match/error; fail-open counts as clean and requires the
-warning to distinguish unavailable classification. Caller cancellation is never
-converted to a successful fail-open result. LiteLLM responses keep exactly the
-existing `action`, optional `blocked_reason`, and `texts` contract; no metadata is
-added. Native v1 findings include the score and correct `text_index`.
-
-[Compose example](examples/semantic/compose.yaml) wires the service to an external
-sidecar on `classifier:8080/classify`. Set `SEMANTIC_SIDECAR_IMAGE` to your compatible
-image (prefer an immutable digest). The example deliberately supplies no model
-image and is not a verified model deployment. Build/Compose validation belongs on
-the designated build host; it was not run on docker-box for this change.
-
-Prompt Guard 2 offers 22M/86M checkpoints; Meta describes its mDeBERTa basis and
-Llama 4 license in the [primary implementation documentation](https://github.com/meta-llama/PurpleLlama/blob/main/Llama-Prompt-Guard-2/README.md).
-Check the [22M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M)
-and [86M model card](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
-for access, label mapping, license and use restrictions before downloading.
-The FP32 weights are 283 MB (22M) and 1.1 GB (86M, large multilingual vocabulary);
-runtime memory and tokenization add overhead. Checkpoints are not bundled. The [TEI supported architectures](https://huggingface.co/docs/text-embeddings-inference/supported_models)
-do not list mDeBERTa: a TEI `/predict` wire format does **not** establish Prompt Guard
-compatibility with a stock TEI image. Supply a compatible external server or a
-validated custom implementation; no Python runtime, CGO, model or provider is
-required by the Go service or its fixed-fixture/httptest suites. The rune chunk
-heuristic does not guarantee a checkpoint token limit; calibrate the sidecar and
-threshold against your traffic before deployment. See [ADR 0016](docs/adr/0016-semantic-policy-adapter.md).
-
-### Semantic sidecar with a real model (L10, L11)
-
-[`deploy/semantic-sidecar`](deploy/semantic-sidecar/README.md) is a deployable
-CPU sidecar for the `scores` format: a small bounded Python service (no
-`trust_remote_code`, safetensors only, non-root, read-only filesystem, offline at
-runtime) that serves a prompt-injection classifier on `POST /classify`, with
-`/healthz` and `/readyz`. The default model is
-[`meta-llama/Llama-Prompt-Guard-2-86M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M)
-(multilingual, pinned commit, weights verified by sha256, labels `LABEL_0`/`LABEL_1`
-with `LABEL_1` malicious and a load-time canary guarding the mapping). It is gated
-and published under the Llama 4 Community License: the build needs your own Hugging
-Face access, passed as a BuildKit secret (`HF_TOKEN`), and this repository ships no
-weights and no image. **Built with Llama.** Llama 4 is licensed under the Llama 4
-Community License, Copyright © Meta Platforms, Inc. All Rights Reserved; read the
-"Llama license and distribution" section of the sidecar README before sharing an
-image. The 22M model is a configuration profile; the previous default
-[`protectai/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2)
-(Apache-2.0, English only) stays available as a fallback profile. Model, revision and
-attack labels are configuration; see
-[ADR 0019](docs/adr/0019-real-semantic-sidecar.md) (server, TEI decision: stock TEI
-lists only CamemBERT and XLM-RoBERTa for sequence classification) and
-[ADR 0020](docs/adr/0020-llama-prompt-guard-2.md) (model choice, labels, licence).
-
-```sh
-# build host only; HF_TOKEN comes from your secret store through command substitution,
-# never typed on a command line and never from a file in the repo
-HF_TOKEN="$(<secret-store read command>)" docker compose -f deploy/semantic-sidecar/compose.yaml up --build
-# no token: the public fallback
-docker compose -f deploy/semantic-sidecar/compose.yaml \
-  --env-file deploy/semantic-sidecar/profiles/deberta-fallback.env up --build
-```
-
-**Status.** Validated with the real models on the build host (`codex-dev`,
-13/11/2026, head `eac5f59`): image build with a BuildKit secret, offline load of the
-86M, 22M and DeBERTa checkpoints, the label mapping and canary, the `scores` contract,
-the Compose stack (readiness, isolated network, hardening, bounded drain on SIGTERM)
-and the Go service against the sidecar. The drain covers only the current sidecar HTTP
-request: an analysis spanning multiple chunk batches can have its next batch refused
-during shutdown. The Go service then applies its configured failure mode (sanitized
-502 when fail-closed, degraded pass-through when fail-open).
-
-**Quality (measured, threshold `0.9`, same protocol for each model).** On the 62-case
-French injection corpus the deterministic detector scores 29 TP / 1 FP / 30 TN / 2 FN
-(recall 93.5%, FPR 3.2%). The 86M model alone scores 11 / 4 / 27 / 20 (35.5% / 12.9%)
-and the two combined 30 / 5 / 26 / 1 (96.8% / 16.1%). The previous DeBERTa default
-alone scored 30 / 27 / 4 / 1 (96.8% / 87.1%). On the original corpus (83 cases, French
-and English reported apart in the evaluation) the 86M model alone finds 8 of 13
-attacks with no false positive, and combined with the deterministic detector the
-result is identical to the deterministic detector (13 TP, 1 FP); DeBERTa flagged 36 of
-70 negatives. The 86M model is therefore a low-noise second opinion, not a French
-blocking detector: its false-positive rate on French injection negatives (16.1%) is
-above the 5% bar set beforehand for `block`, so the examples stay in **`annotate`**.
-Full tables, provenance (commit, threshold, hardware, n, repetitions) and limits:
-[`deploy/semantic-sidecar/EVALUATION.md`](deploy/semantic-sidecar/EVALUATION.md).
-Latency adds about 165-170 ms p50 / 200-210 ms p95 on 2 shared vCPUs (the
-deterministic detector takes about 0.3 ms).
-
-**Recommendation.** Keep the semantic detector disabled by default. If you enable
-it, use `semantic_prompt_injection: annotate` with `prompt_injection: block`, as
-the [example `semantic` policy](examples/semantic/policies/policies.yaml) does.
-A policy that explicitly sets the semantic detector to `block` (example
-`semantic-block`) remains configurable, but a semantic block takes precedence over a
-secret `mask` in the same policy: a text the model calls an injection (typically
-`password=…`) is refused whole instead of being redacted, regardless of the order of the
-detector steps within the same evaluated stage (input and output are evaluated
-separately), in enforce mode. With the previous DeBERTa model
-this happened often; the 86M model rarely flags credential texts in the corpora, but the
-precedence rule is unchanged. It is a limit of the models, not an API defect.
-The real-model check is a Go test behind the `realsidecar` build tag (excluded
-from `go test ./...` and from GitHub CI):
-
-```sh
-SEMANTIC_SIDECAR_URL=http://127.0.0.1:18080 SEMANTIC_SIDECAR_FRENCH=1 \
-  go test -tags realsidecar ./tests/integration/semantic_sidecar -run TestRealModel -count=1 -v
-```
-
-**Size `SEMANTIC_TIMEOUT` for your text limit.** On the test host (2 shared vCPUs,
-inference serialized) a 510-character chunk costs about 200 ms with the 86M model (L11, French text; the
-older 125 ms figure came from another image and load and is not comparable). 32
-chunks took 6.5 s, so the `2s` Go default fails on texts of about 10 chunks or more.
-`MAX_TEXT_CHARS=20000` is about 45 chunks (510 characters with a 64-character overlap), roughly 9 s at low
-load (extrapolated, not measured at that size): the Compose default of `10s` leaves
-almost no margin, so use 15 s or more for `SEMANTIC_TIMEOUT`, or lower `MAX_TEXT_CHARS`; recalibrate under concurrency
-(`HTTP_MAX_CONCURRENT_REQUESTS`) and keep `HTTP_WRITE_TIMEOUT` and any upstream
-guardrail timeout above the worst whole request. `SEMANTIC_FAILURE_MODE=closed`
-returns 502 when the sidecar fails, times out or rejects an over-long text; `open`
-passes the text and logs `semantic classifier degraded`. `SEMANTIC_THRESHOLD` is
-per-model and must be calibrated on your data (the sidecar returns probabilities
-only). The 510-rune chunking stays a heuristic: the sidecar counts real tokens and
-answers 422 rather than truncating. The sidecar deadline is cooperative (observed
-between micro-batches, so one micro-batch can overrun it) and a request the client
-abandoned can keep a serialized sidecar busy. Measurements, formulas and caveats:
-[sidecar README](deploy/semantic-sidecar/README.md#measured-results-and-limits).
-The Compose stack attaches the sidecar only to an `internal: true` network.
-
-### Optional System One judge (L12a)
-
-`semantic_prompt_injection` can ask TypeSafe's
-[System One API](https://docs.typesafe.ai/api/system-one.md) (model Jev) for a
-second opinion. It is disabled by default and contacts no network when disabled.
-The client asks one typed question (`noul`, `choice` or `score`) with fixed,
-compiled-in wording; the scanned text is sent only as data in
-`state.untrusted_text`. Answers are validated strictly (question name and type,
-finite probabilities in [0, 1], option and level sets, sums within 0.05 of 1,
-bounded 64 KiB body); anything else is a typed failure, never a score. Design and
-primary references: [ADR 0021](docs/adr/0021-systemone-gray-zone-judge.md) and the
-[package README](internal/semantic/systemone/README.md).
-
-**Modes.** `cascade` (requires `SEMANTIC_ENABLED=true`) scores every text with the
-sidecar and asks the judge only when the sidecar score `s` satisfies
-`SYSTEMONE_ZONE_LOWER <= s <= SYSTEMONE_ZONE_UPPER` (both bounds inclusive).
-Outside the zone the sidecar decides and no judge request is made. A sidecar
-failure is never read as a score of 0: the judge is not called and
-`SEMANTIC_FAILURE_MODE` applies. `judge_only` (requires `SEMANTIC_ENABLED=false`)
-judges every non-blank text, for measurement. Both keep the detector name, so
-policies do not change; a judge decision reports rule `systemone_judge`.
-
-**Masking is mandatory.** Before any request, each text is masked by an internal
-policy (not part of the catalog, never containing a semantic detector) with
-`detect_secret` and `detect_pii` and typed masks such as `[EMAIL]`, plus a
-judge-only Unicode email rule (quoted local parts and IP-literal domains are not
-covered). It always includes the embedded default rules and,
-with `GUARDRAILS_CONFIG_DIR`, the operator rules too: overrides add coverage, never
-remove it. If masking fails or the masked text exceeds `SYSTEMONE_MAX_TEXT_RUNES`,
-nothing is sent and the request fails (502) in either failure mode: these failures
-come from the input, and `open` must not let crafted text switch the judge off. Findings keep original positions (whole
-original text) and client texts are never rewritten by the judge. **Coverage is
-bounded:** native secret rules and entropy, email, French phone numbers, IBAN,
-IPv4, payment cards, NIR, SIREN and SIRET. Names, postal addresses, other phone
-formats and free-form identifiers are not masked; this reduces exposure, it does
-not guarantee that no personal data leaves.
-
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `SYSTEMONE_ENABLED` | `false` | Boolean |
-| `SYSTEMONE_MODE` | `cascade` | `cascade` or `judge_only` |
-| `SYSTEMONE_BASE_URL` | empty | Required when enabled. `https` (http only for loopback), no credentials, query or fragment; requests go to `<base>/v1/systemone`, so a gateway path prefix works |
-| `SYSTEMONE_MODEL` | empty | Required when enabled, for example `jev-1.14.0`; pin a versioned ID once thresholds are tuned (aliases move) |
-| `SYSTEMONE_API_KEY_FILE` | empty | File holding the key (preferred); exactly one of the two key variables is required when enabled |
-| `SYSTEMONE_API_KEY` | empty | Key value; never logged or echoed |
-| `SYSTEMONE_QUESTION` | `noul` | `noul`, `choice` (probability of option `injection`) or `score` (probability of the top level) |
-| `SYSTEMONE_THRESHOLD` | `0.7` | Probability in (0, 1]; equality triggers. Starting point from the Noul docs, not calibrated |
-| `SYSTEMONE_ZONE_LOWER` / `SYSTEMONE_ZONE_UPPER` | empty | Required in `cascade`; in [0, 1], lower <= upper, inclusive |
-| `SYSTEMONE_TIMEOUT` | `3s` | Per text; texts are judged one after another and in cascade each also waits for `SEMANTIC_TIMEOUT`. `HTTP_WRITE_TIMEOUT` bounds the whole request and cancels pending calls |
-| `SYSTEMONE_FAILURE_MODE` | `closed` | Provider failures only. `closed`: 502; `open`: the text passes and `semantic classifier degraded` is logged. Input-provoked failures (masking, size, provider 400/413/422 `rejected_input`) and cancellation always fail |
-| `SYSTEMONE_MAX_TEXT_RUNES` | `20000` | Larger masked texts fail without being sent |
-
-The key is sent only as `Authorization: Bearer` to the configured host: no
-redirect is followed, environment proxies are ignored, and caller headers are
-never forwarded. Errors and logs carry a failure kind (`unauthorized`,
-`payment_required`, `rate_limited`, `overloaded`, `rejected_input`, `timeout`, `masking_failed`,
-`invalid_probability`, ...) and at most a status code. There is no retry.
-
-**Cost and limits** (primary sources, read 14/11/2026): USD 0.042 per million
-input tokens, output free, prepaid credits; an exhausted balance returns 402
-([pricing](https://help.typesafe.ai/articles/5187202169-how-much-does-jev-cost)).
-Default rate limits are 100k tokens/s and 80 requests/s per organization; the
-context is 64k tokens per request ([models](https://docs.typesafe.ai/models.md)).
-The public API has no balance endpoint (`/v1/models` and `/v1/systemone` only), so
-watch `guardrail_systemone_input_tokens_total` and 402 outcomes.
-
-### Native secret detection
-
-Without a `detect_secret_contextual_patterns.yaml` override, `detect_secret`
-uses the native [secret scanner](internal/secrets/README.md): 217 embedded,
-pinned MIT gitleaks rules, keyword assignments and Shannon entropy (base64
-4.5, hex 3.0). Generic length/base64/hex regexes are retired. Bare git SHAs,
-UUIDs, likely identifiers, templates and sequences are filtered; strong secret
-assignment context still masks a hash-shaped password. No network verification,
-Python process or scanner library is required. See [NOTICE](NOTICE).
-
-Native secrets use the same normalization as PII/injection: invisible controls
-are stripped and NFKC is applied for detection, then spans are mapped to original
-bytes and complete graphemes before the engine emits original rune offsets.
-Masking preserves surrounding original text. Rule names now use `gitleaks:`,
-`keyword:` and `entropy:` prefixes; types are `SECRET` or `HIGH_ENTROPY_STRING`
-(the latter includes the entropy score). Typed masks follow these types.
-
-An explicit YAML secrets override in `GUARDRAILS_CONFIG_DIR` **replaces the
-native scanner entirely**, retaining legacy regex matching on original text,
-named `secret` captures, rule names and types. An empty override disables secret
-detection. A missing file enables native defaults even when other overrides
-exist. Remove the secrets override to migrate; copied older defaults retain
-older behavior until removed. No secrets YAML is shipped in the default-resource directory, so copying
-that directory to customize other resources keeps native detection enabled.
-No environment variables changed.
-
-Detection is heuristic, not exhaustive: plain unquoted word passwords,
-multi-line YAML values, encoded secrets and some prose labels can be missed;
-normalization can broaden matches. Provider allowlists and entropy filters can
-produce false negatives; entropy can produce false positives. Limits and the
-representative synthetic corpus are documented in the package README. Bound
-request sizes and execution deadlines remain essential because all active
-provider regexes scan the text. See [ADR 0017](docs/adr/0017-secret-detector-integration.md).
-
-For compatibility with the fixed evaluation contract, the adapter also retains
-`compat:aws_access_key_id` (`AKIA` followed by 16 uppercase letters/digits,
-word boundaries), including documentation examples excluded by upstream
-allowlists. This conservative rule may mask public AWS examples; other native
-allowlists remain unchanged. Legacy overrides retain their historical types
-and masks, which differ from the native defaults above.
+MIT, see [LICENSE](LICENSE) and [NOTICE](NOTICE) for embedded third-party rules.
+The optional sidecar can download Llama Prompt Guard 2, licensed separately under
+the Llama 4 Community License (Built with Llama).

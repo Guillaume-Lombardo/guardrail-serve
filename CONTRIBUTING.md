@@ -21,10 +21,10 @@ pre-commit install
 ## Development workflow
 
 1. Create a dedicated branch from `main`.
-2. Validate scope in `plan.md` before substantial implementation.
+2. Validate scope in `.agents/plan.md` before substantial implementation.
 3. Implement the change with tests.
 4. Keep docs and config in sync when behavior changes:
-   - `README.md`
+   - `README.md` and the matching page in `docs/`
    - `.env.template`
    - `docs/adr/*` when architecture changes
 5. Open a Pull Request.
