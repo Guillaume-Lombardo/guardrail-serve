@@ -1,0 +1,7 @@
+This image contains the model qualifire/prompt-injection-sentinel
+(https://huggingface.co/qualifire/prompt-injection-sentinel, revision
+e24131782819a4787c129ed2b9a4a67ae57a584e), fine-tuned from answerdotai/ModernBERT-large.
+It is licensed under the Elastic License 2.0; the license text travels with the weights
+in /models/model/LICENSE.md and must be given to anyone who receives a copy. The license
+forbids providing the software to third parties as a hosted or managed service that
+gives them access to a substantial set of its features. It contains no Llama Materials.

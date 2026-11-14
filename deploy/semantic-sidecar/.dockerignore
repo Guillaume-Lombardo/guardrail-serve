@@ -4,3 +4,4 @@ tools/measure.py
 *.md
 compose*.yaml
 .env*
+bench

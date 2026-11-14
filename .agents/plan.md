@@ -572,7 +572,7 @@ the orchestrator.
 
 ## L12a — System One (Jev) gray-zone judge (validated)
 
-- Status: in progress (14/11/2026). Branch `feat/systemone-judge`, base `main` at `919b349`.
+- Status: merged (#24, 14/11/2026). Branch `feat/systemone-judge`, base `main` at `919b349`.
   Budget: at most three PRs in total, deadline 17/11/2026 23:00 Paris time. The L12
   evaluation bench runs in parallel (corpus `tests/eval/corpus/semantic-bench/**`,
   `tests/eval/semanticbenchfixtures/**`, `tests/eval/README.md`, ADR 0022) and is
@@ -611,3 +611,58 @@ the orchestrator.
   4. Startup validation rejects invalid zone, URL, key, mode combinations.
   5. Metrics are bounded and value-free; registry isolation and auth unchanged.
 - ADR: `docs/adr/0021-systemone-gray-zone-judge.md`.
+
+## L12b — Semantic model bench (validated)
+
+- Status: in progress (14/11/2026). Branch `chore/semantic-model-bench`, base `main` at
+  `e75f13c`. Last of the three L12 PRs (#23 corpus and #24 judge are merged). One PR,
+  no merge by this agent. Deadline 17/11/2026 23:00 Paris time.
+- Objective: a reproducible bench and real results on the French semantic benchmark
+  (ADR 0022) comparing the deterministic rules, Llama Prompt Guard 2 86M (threshold
+  0.9 and recalibrated), Prompt Guard 2 22M, ProtectAI DeBERTa v2 (reference),
+  Qwen3Guard-Gen-0.6B, Qualifire Sentinel, the System One judge (Jev) alone and the
+  full cascade rules -> Prompt Guard 2 86M -> Jev in the gray zone.
+- In scope: `cmd/guardrail-bench/**` (Go runner, proxies, calibration, metrics,
+  report), bench-only Python under `deploy/semantic-sidecar/bench/**` (Qwen3Guard
+  backend on the real sidecar server, chart script), one pinned sidecar profile for
+  Sentinel, notices, `deploy/semantic-sidecar/EVALUATION.md`, `docs/evaluation.md`,
+  ADR 0023, this plan, README Results only if the recommendation changes.
+- Out of scope: corpus, labels, baselines, detector rules, runtime defaults (unless
+  the decision rule below says so), credit purchase, credential creation or rotation.
+- Protocol fixed before any measurement (frozen in a hashed protocol file committed
+  before the test split is run):
+  - Calibration split (80 cases) only for thresholds and the gray zone; the test split
+    (160) is run once per candidate after the freeze; no change after seeing it.
+  - R1 threshold, per local classifier: candidates are the distinct calibration scores
+    plus 1.0; the threshold is the lowest candidate whose union with the rules keeps
+    calibration false positives at or below floor(5% x 40) = 2 (inclusive `>=`). If the
+    rules alone exceed that budget, the lowest candidate keeping the model alone at or
+    below 2 is used and the fallback is reported.
+  - Qwen3Guard-Gen: no free parameter. Prompt moderation of every text, greedy decoding,
+    strict parse of `Safety: Safe|Unsafe|Controversial` and `Categories:`; injection
+    iff the category list contains `Jailbreak`. Score 1.0 or 0.0, never a probability.
+    `Safety: Unsafe` with other categories (PII, violence, ...) is not an injection.
+  - R2 gray zone (Prompt Guard 2 86M, calibration, no Jev): upper bound U = the R1
+    threshold of the 86M model, also used as SEMANTIC_THRESHOLD; lower bound L = the
+    lowest calibration score v <= U such that at most 25% of calibration texts (20)
+    satisfy v <= s <= U. Both bounds inclusive.
+  - Jev fixed a priori: `jev-1.14.0` (checked with GET /v1/models), question `noul`,
+    threshold 0.7 (Noul documentation starting point and repository default), timeout
+    10 s, fail closed. Jev sees only the test split, never calibration.
+  - Decision rule D1: a chain may replace the default (semantic `annotate`, 86M) only
+    if its test FPR is at most 5% (<= 4/80) and its test recall is at least the recall
+    of rules + 86M at 0.9. Otherwise the defaults stay and the report gives numbers.
+- Execution: one sidecar image per model built from `main` code with pinned revision
+  and weights sha256 (BuildKit secret for gated models), one model at a time, 2 CPU,
+  concurrency 1, warmup excluded, through the real Go service (in-process, loopback) and
+  a recording proxy that caches scores per text hash; Jev through a loopback proxy that
+  caches answers per hash of the masked request, enforces the budget and refuses
+  unmasked egress. The cascade reuses both caches (no new inference, no new call).
+- Budget: L12 Jev cap USD 5 (visible credit USD 10, confirmed 14/11 12:05). Proxy caps
+  per bench: 200 upstream calls, USD 1 cumulative estimate, stop on 401 or 2
+  consecutive 402/429. Cost estimate recorded before any paid call.
+- Acceptance: offline tests for leaks (wire), calibration rules, cost, cache and
+  metrics; results JSON, PNG chart and a key-free reproducer; EVALUATION.md and
+  docs/evaluation.md with TP/FP/TN/FN, denominators, Wilson intervals, p50/p95, judge
+  fraction, USD per 1000 requests, errors apart; historical corpora apart.
+- ADR: `docs/adr/0023-semantic-model-bench.md`.
