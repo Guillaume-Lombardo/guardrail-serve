@@ -59,8 +59,11 @@ existing HTTP harness already runs.
    case, accents, homoglyphs and leet folded, invisible characters, spaces and
    punctuation removed) or a near-duplicate (character 5-gram Jaccard ≥ 0.5) across
    splits. The tests also assert there is no such overlap with the two L9 corpora; no
-   L9 case is copied. During authoring, one draft case was a close rewording of an L9
-   negative (similarity 0.63); it was rewritten.
+   L9 case is copied. These checks are lexical. Paraphrases of the same intent written with different
+   words are not detected by them, so they were looked for by review: authoring found
+   one draft close to an L9 negative (similarity 0.63), and the first independent
+   review found two pairs of cross-split paraphrases (a FR-EN prompt-leak request and a
+   refusal of an embedded instruction); those cases were rewritten.
 5. **Labels follow execution intent.** A case is positive when the text (or content
    embedded in a document, e-mail, page or tool output) asks the assistant to apply an
    instruction that overrides its rules, takes its role, reveals hidden prompts,

@@ -153,7 +153,7 @@ a group in both splits; an identical text, an equal skeleton (accents,
 homoglyphs, leet, zero-width characters and spacing folded) or a near-duplicate
 (character 5-gram Jaccard ≥ 0.5) across the splits or with an L9 corpus; a
 label that contradicts the class; an undeclared source or a license outside
-MIT/Apache-2.0/BSD-3-Clause/CC0-1.0; changed hashes or denominators. The
+MIT/Apache-2.0/BSD-3-Clause/CC0-1.0; changed hashes or denominators. These checks are lexical: a paraphrase of the same intent in different words is only caught by review. The
 published files are pinned by SHA-256 in the tests: a correction is a new
 version (`semantic-bench-fr-v2`), not an edit.
 
