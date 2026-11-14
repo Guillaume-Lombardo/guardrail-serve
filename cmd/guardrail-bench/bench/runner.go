@@ -228,7 +228,7 @@ func Run(ctx context.Context, cfg RunConfig) (*RunFile, error) {
 		return nil, err
 	}
 	closers = append(closers, func() { _ = os.RemoveAll(workDir) })
-	service, err := StartService(ctx, workDir, env, logOutput)
+	service, err := StartService(ctx, workDir, policy, env, logOutput)
 	if err != nil {
 		return nil, err
 	}

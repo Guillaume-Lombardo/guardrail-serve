@@ -26,31 +26,15 @@ const (
 	PolicyUnion = "bench-union"
 )
 
-const benchPolicies = `version: 1
-policies:
-  - name: bench-rules
-    mode: enforce
-    stages:
-      input:
-        - detector: prompt_injection
-          action: block
-      output:
-        - detector: prompt_injection
-          action: block
-  - name: bench-union
-    mode: enforce
-    stages:
-      input:
-        - detector: prompt_injection
-          action: block
-        - detector: semantic_prompt_injection
-          action: block
-      output:
-        - detector: prompt_injection
-          action: block
-        - detector: semantic_prompt_injection
-          action: block
-`
+// benchPolicy returns a catalog holding only the evaluated policy: the
+// semantic detector does not exist in rules runs.
+func benchPolicy(name string) string {
+	steps := "        - detector: prompt_injection\n          action: block\n"
+	if name == PolicyUnion {
+		steps += "        - detector: semantic_prompt_injection\n          action: block\n"
+	}
+	return "version: 1\npolicies:\n  - name: " + name + "\n    mode: enforce\n    stages:\n      input:\n" + steps + "      output:\n" + steps
+}
 
 // serviceEnvPrefixes are cleared before each run so that no setting of the
 // calling shell leaks into a measured configuration.
@@ -69,12 +53,12 @@ type Service struct {
 
 // StartService writes the bench policies under workDir, sets the run
 // environment and serves the handler built by internal/app on 127.0.0.1.
-func StartService(ctx context.Context, workDir string, env map[string]string, logOutput io.Writer) (*Service, error) {
+func StartService(ctx context.Context, workDir, policy string, env map[string]string, logOutput io.Writer) (*Service, error) {
 	policiesDir := filepath.Join(workDir, "policies")
 	if err := os.MkdirAll(policiesDir, 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(policiesDir, "policies.yaml"), []byte(benchPolicies), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(policiesDir, "policies.yaml"), []byte(benchPolicy(policy)), 0o644); err != nil {
 		return nil, err
 	}
 	for _, entry := range os.Environ() {
@@ -87,7 +71,7 @@ func StartService(ctx context.Context, workDir string, env map[string]string, lo
 	}
 	base := map[string]string{
 		"GUARDRAILS_CONFIG_DIR":  policiesDir,
-		"LITELLM_DEFAULT_POLICY": PolicyRules,
+		"LITELLM_DEFAULT_POLICY": policy,
 		"LOG_FORMAT":             "json",
 		"API_PORT":               "0",
 	}
