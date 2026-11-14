@@ -28,7 +28,7 @@ def rows_for(results):
             continue
         seen.add(row["config"])
         rows.append(row)
-    rows.sort(key=lambda r: (r["fpr"]["value"], -r["recall"]["value"]))
+    rows.sort(key=lambda r: (-r["recall"]["value"], r["fpr"]["value"], r["config"]))
     return rows
 
 

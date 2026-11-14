@@ -614,7 +614,7 @@ the orchestrator.
 
 ## L12b — Semantic model bench (validated)
 
-- Status: in progress (14/11/2026). Branch `chore/semantic-model-bench`, base `main` at
+- Status: measured, in review (14/11/2026 17:41 Paris). Branch `chore/semantic-model-bench`, base `main` at
   `e75f13c`. Last of the three L12 PRs (#23 corpus and #24 judge are merged). One PR,
   no merge by this agent. Deadline 17/11/2026 23:00 Paris time.
 - Objective: a reproducible bench and real results on the French semantic benchmark
@@ -688,3 +688,18 @@ the orchestrator.
     the pre-call check assumed they were; corrected to the 64k maximum before any bench
     call). Revised expectation: about 500-700 tokens per bench call, about 100,000
     tokens, about USD 0.004.
+- Budget mechanism after review (14/11/2026): the worst case is reserved before each
+  call and kept as spent when billing is unknown (transport failure, 5xx, unreadable
+  answer, invalid usage); every attempt is ledgered; paid traffic stops when another
+  model version is served; answers are reduced to the `noul` value before caching.
+- Outcome (14/11/2026, details in `deploy/semantic-sidecar/EVALUATION.md`):
+  - Calibration 16:54 to 17:07, protocol frozen and committed (`77e366c`, sha256
+    `46076199654a…`) before the test runs (17:08 to 17:41). No error except one test
+    text refused by the egress guard (unmasked all-zero demonstration card number).
+  - Test split: rules + 86M at 0.9 20/80 recall, 2/80 FP; rules + judge 72/80, 3/79
+    FP + 1 error; rules + cascade 33/80, 3/80; rules + Qwen3Guard 31/80, 2/80 (2.9 s
+    p50). D1 passes for those three chains; defaults unchanged (the judge needs a key
+    and masked egress, Qwen3Guard is bench-only); README Results gained the held-out
+    rows and the judge recommendation.
+  - Real paid traffic: 160 calls (1 probe + 159 bench), 72,711 input tokens,
+    USD 0.003054, all 200, `jev-1.14.0` served for every answer. Cascade: 0 calls.
