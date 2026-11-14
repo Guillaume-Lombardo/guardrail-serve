@@ -666,3 +666,16 @@ the orchestrator.
   docs/evaluation.md with TP/FP/TN/FN, denominators, Wilson intervals, p50/p95, judge
   fraction, USD per 1000 requests, errors apart; historical corpora apart.
 - ADR: `docs/adr/0023-semantic-model-bench.md`.
+- Jev cost estimate (recorded 14/11/2026 16:50 Paris, before any paid call). Source:
+  docs.typesafe.ai models page and help.typesafe.ai pricing article, read 14/11/2026:
+  USD 0.042 per million input tokens, output free, no per-request fee; repeated
+  requests are not documented as free, so every upstream call is assumed billed.
+  - Calls: 160 judge calls (bench-test only, once per text, then cached) plus one
+    unbilled `GET /v1/models`. The cascade reuses the cache: 0 new calls.
+  - Size: masked body at most about 1.1 KB (589 bytes of fixed instructions, texts at
+    most 303 bytes as JSON, wrapper), mean about 0.9 KB.
+  - Expected: about 300 input tokens per call, about 48,000 tokens, about USD 0.002.
+  - Bound enforced before each call: input tokens <= body bytes, so 160 x 1.1 KB =
+    176,000 tokens = USD 0.0074. Proxy hard caps: 200 upstream calls and USD 1
+    cumulative (absolute worst case 200 x 64k tokens = USD 0.54); stop on 401 or two
+    consecutive 402/429. All far below the USD 5 L12 cap.
