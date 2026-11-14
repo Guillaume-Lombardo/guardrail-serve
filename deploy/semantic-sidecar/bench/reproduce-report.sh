@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 RESULTS=$ROOT/deploy/semantic-sidecar/bench/results
 cd "$ROOT"
-go run ./cmd/guardrail-bench report -bundle "$RESULTS/runs.json" -protocol "$RESULTS/protocol.json" \
+go run ./cmd/guardrail-bench report -root "$ROOT" -bundle "$RESULTS/runs.json" -protocol "$RESULTS/protocol.json" \
   -out "$RESULTS/results.json" -markdown "$RESULTS/results.md"
 uv run --no-project --python 3.13 --with matplotlib==3.10.7 \
   python -I "$ROOT/deploy/semantic-sidecar/bench/plot_bench.py" "$RESULTS/results.json" "$RESULTS/bench-test.png"

@@ -46,7 +46,8 @@ type Row struct {
 	Latency        Latency  `json:"latency_e2e"`
 	ModelLatency   Latency  `json:"latency_model_upstream"`
 	JudgeLatency   Latency  `json:"latency_judge_upstream"`
-	JudgeFraction  *Rate    `json:"judge_fraction,omitempty"`
+	JudgeFraction  *Rate    `json:"judge_fraction,omitempty"` // requests routed to the judge / all requests
+	JudgeAnswered  int      `json:"judge_answered,omitempty"` // routed requests that got a judge answer
 	JudgeTokens    int64    `json:"judge_input_tokens,omitempty"`
 	USDPer1000     *float64 `json:"usd_per_1000_requests,omitempty"`
 	ErrorKinds     []string `json:"error_kinds,omitempty"`
@@ -110,13 +111,18 @@ func formatThreshold(t float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", t), "0"), ".")
 }
 
-// Report computes every row, the paired comparisons and the D1 decision.
-func Report(bundle *Bundle, protocol *Protocol, protocolSHA string) (*Results, error) {
+// Report computes every row, the paired comparisons and the D1 decision. Every
+// run is first checked against its canonical corpus (same file hash, every case
+// exactly once with its label and language) and against the frozen protocol.
+func Report(bundle *Bundle, protocol *Protocol, protocolSHA string, corpora map[string]*LoadedCorpus) (*Results, error) {
 	if bundle.Format != BundleFormat || bundle.Version != FormatVersion {
 		return nil, errors.New("not a guardrail-bench-runs bundle")
 	}
 	if bundle.ProtocolSHA256 != protocolSHA {
 		return nil, fmt.Errorf("bundle was exported for protocol %s, not %s", short(bundle.ProtocolSHA256), short(protocolSHA))
+	}
+	if calibration := corpora[CorpusCalibration]; calibration == nil || calibration.SHA256 != protocol.CalibrationSHA256 {
+		return nil, errors.New("the protocol was not frozen on the canonical calibration corpus")
 	}
 	results := &Results{Format: ResultsFormat, Version: FormatVersion, ProtocolSHA256: protocolSHA, PriceUSDPerMTk: JevUSDPerMillionInputTokens, Protocol: protocol}
 	seen := map[string]bool{}
@@ -133,6 +139,12 @@ func Report(bundle *Bundle, protocol *Protocol, protocolSHA string) (*Results, e
 		}
 		if run.Mode.usesJudge() && run.Corpus != CorpusTest {
 			return nil, fmt.Errorf("run %s used the judge outside %s", run.RunID, CorpusTest)
+		}
+		if err := checkCases(run, corpora[run.Corpus]); err != nil {
+			return nil, err
+		}
+		if err := protocol.CheckRun(run); err != nil {
+			return nil, err
 		}
 		checks, err := consistency(run)
 		if err != nil {
@@ -234,6 +246,36 @@ func Report(bundle *Bundle, protocol *Protocol, protocolSHA string) (*Results, e
 	return results, nil
 }
 
+// checkCases refuses a run that is not exactly the canonical corpus: a missing,
+// duplicated or relabelled case would bias every rate computed from it.
+func checkCases(run *RunFile, corpus *LoadedCorpus) error {
+	if corpus == nil {
+		return fmt.Errorf("run %s: corpus %s is not loaded", run.RunID, run.Corpus)
+	}
+	if run.CorpusSHA256 != corpus.SHA256 {
+		return fmt.Errorf("run %s was measured on another version of %s", run.RunID, run.Corpus)
+	}
+	if len(run.Cases) != len(corpus.Cases) {
+		return fmt.Errorf("run %s has %d cases, %s has %d", run.RunID, len(run.Cases), run.Corpus, len(corpus.Cases))
+	}
+	canonical := make(map[string]Case, len(corpus.Cases))
+	for _, item := range corpus.Cases {
+		canonical[item.ID] = item
+	}
+	seen := make(map[string]bool, len(run.Cases))
+	for _, item := range run.Cases {
+		want, ok := canonical[item.ID]
+		if !ok || seen[item.ID] {
+			return fmt.Errorf("run %s: case %s is unknown or repeated", run.RunID, item.ID)
+		}
+		seen[item.ID] = true
+		if item.Label != want.Label || item.Lang != want.Lang {
+			return fmt.Errorf("run %s: case %s label or language differs from the corpus", run.RunID, item.ID)
+		}
+	}
+	return nil
+}
+
 func appendUnique(values []string, value string) []string {
 	for _, existing := range values {
 		if existing == value {
@@ -313,12 +355,22 @@ func buildRow(run *RunFile, component, config, slice string) Row {
 		row.Threshold = &threshold
 	}
 	var e2e, model, judge []float64
-	judged, decided := 0, 0
+	requests, routed := 0, 0
 	var tokens int64
 	errorKinds := map[string]int{}
 	for _, item := range run.Cases {
 		if slice != "all" && item.Lang != slice {
 			continue
+		}
+		// Judge use and cost count every request, whatever its outcome: a billed
+		// answer the service then rejected still cost money.
+		requests++
+		if item.JudgeCalls > 0 {
+			routed++
+			tokens += item.JudgeTokens
+			if item.JudgeCache == "hit" || item.JudgeCache == "live" {
+				row.JudgeAnswered++
+			}
 		}
 		if item.Status != StatusOK {
 			row.Counts.Errors++
@@ -330,16 +382,13 @@ func buildRow(run *RunFile, component, config, slice string) Row {
 			}
 			continue
 		}
-		decided++
 		row.Counts.Add(item.Label, detected(component, item))
 		e2e = append(e2e, item.LatencyMS)
 		if item.ModelCalls > 0 {
 			model = append(model, item.ModelMS)
 		}
 		if item.JudgeCalls > 0 {
-			judged++
 			judge = append(judge, item.JudgeMS)
-			tokens += item.JudgeTokens
 		}
 	}
 	row.Recall, row.FPR = row.Counts.Recall(), row.Counts.FPR()
@@ -353,11 +402,11 @@ func buildRow(run *RunFile, component, config, slice string) Row {
 	}
 	sort.Strings(row.ErrorKinds)
 	if run.Mode.usesJudge() {
-		fraction := Wilson(judged, decided)
+		fraction := Wilson(routed, requests)
 		row.JudgeFraction = &fraction
 		row.JudgeTokens = tokens
-		if decided > 0 {
-			usd := CostUSD(tokens) / float64(decided) * 1000
+		if requests > 0 {
+			usd := CostUSD(tokens) / float64(requests) * 1000
 			row.USDPer1000 = &usd
 		}
 	}

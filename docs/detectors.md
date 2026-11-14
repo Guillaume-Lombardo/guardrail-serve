@@ -279,7 +279,8 @@ come from the input, and `open` must not let crafted text switch the judge off. 
 original text) and client texts are never rewritten by the judge. **Coverage is
 bounded:** native secret rules and entropy, email, French phone numbers, IBAN,
 IPv4, payment cards, NIR, SIREN and SIRET. Names, postal addresses, other phone
-formats and free-form identifiers are not masked; this reduces exposure, it does
+formats, free-form identifiers and secrets written in prose (a password stated in a
+sentence, not as an assignment) are not masked; this reduces exposure, it does
 not guarantee that no personal data leaves. Validated formats are masked only when
 they validate: the bench (ADR 0023) found that the all-zero demonstration card number
 of one synthetic case (`0000 0000 0000 0000`) is not masked by the `payment_card`

@@ -69,7 +69,7 @@ func TestRulesAndClassifierRunsThroughTheRealService(t *testing.T) {
 
 func TestCascadeRoutesOnlyTheGrayZoneToTheJudge(t *testing.T) {
 	root := repoRoot(t)
-	protocol := &Protocol{DefaultThreshold: DefaultThreshold, Models: []ModelThreshold{{Name: CascadePrimary, Threshold: 0.6}}, Zone: ZoneProtocol{Lower: 0.4, Upper: 0.6}}
+	protocol := &Protocol{DefaultThreshold: DefaultThreshold, Models: []ModelThreshold{{Name: CascadePrimary, Threshold: 0.6}}, Zone: ZoneProtocol{Lower: 0.4, Upper: 0.6}, Jev: frozenJev()}
 	for _, score := range []float64{0.5, 0.95} {
 		sidecar := fakeSidecar(score)
 		cacheDir := t.TempDir()

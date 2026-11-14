@@ -130,7 +130,7 @@ func TestCalibrateRefusesErroredCasesAndMissingModels(t *testing.T) {
 }
 
 func TestRunConfigEnforcesTheProtocol(t *testing.T) {
-	protocol := &Protocol{DefaultThreshold: 0.9, Models: []ModelThreshold{{Name: "pg2-86m", Threshold: 0.7}}, Zone: ZoneProtocol{Lower: 0.5, Upper: 0.7}}
+	protocol := &Protocol{DefaultThreshold: 0.9, Models: []ModelThreshold{{Name: "pg2-86m", Threshold: 0.7}}, Zone: ZoneProtocol{Lower: 0.5, Upper: 0.7}, Jev: frozenJev()}
 	base := RunConfig{CacheDir: t.TempDir()}
 	for name, cfg := range map[string]RunConfig{
 		"judge on calibration": {Corpus: CorpusCalibration, Mode: ModeJudge},

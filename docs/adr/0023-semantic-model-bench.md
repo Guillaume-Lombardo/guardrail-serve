@@ -39,8 +39,10 @@ can trust and rebuild:
    delay; a replay miss is a 503, never an invented score. The System One proxy keys
    answers by sha256 of the exact masked request body (model version, question and
    fixed instructions included), so the judge alone and the cascade share one answer per
-   text. Caches live outside Git (`~/.cache/guardrail-bench`) and hold scores, reduced
-   answers and timings, never text.
+   text. Judge answers are reduced to the asked question's `noul` probability (any other
+   upstream field is dropped) before they are cached or forwarded. Caches live outside
+   Git (`~/.cache/guardrail-bench`) and hold scores, reduced answers and timings, never
+   text.
 3. **The real key never reaches the service.** The service holds a placeholder key and
    talks to the loopback proxy (`SYSTEMONE_BASE_URL=http://127.0.0.1:<port>`); the proxy
    reads the key from a file descriptor, adds it upstream, never logs it, never follows
@@ -49,10 +51,13 @@ can trust and rebuild:
    phone, IPv4, provider tokens, private keys, password assignments) and refuses to send
    a match: the case becomes an error, never a detection.
 4. **Budget enforced before each paid call.** Cache-only mode cannot call upstream at
-   all. Live mode caps calls (200) and cumulative cost (USD 1), checks the worst case of
-   the next call (the documented 64k-token request maximum: billed tokens include a
-   server-side overhead, so the body size is no bound) before sending, stops on 401 and
-   after two consecutive 402/429, and appends a text-free ledger line per call.
+   all. Live mode caps calls (200) and cumulative cost (USD 1) and reserves the worst
+   case of the next call (the documented 64k-token request maximum: billed tokens include
+   a server-side overhead, so the body size is no bound) before sending. An attempt whose
+   billing cannot be known (transport failure, 5xx, unreadable answer, invalid usage)
+   keeps that worst case as spent. It stops on 401, after two consecutive 402/429, and
+   when the API serves another model version than the requested one, and appends a
+   text-free ledger line per attempt.
 5. **Protocol frozen from calibration, then enforced.** `calibrate` applies R1 (lowest
    threshold keeping rules ∪ model calibration false positives ≤ floor(5% × negatives),
    inclusive `>=`; model-alone fallback when the rules alone exceed it) and R2 (gray zone
@@ -69,7 +74,10 @@ can trust and rebuild:
    timings, token counts and host facts, never text. `export` bundles them,
    `report` computes counts, Wilson intervals, nearest-rank p50/p95, judge share, USD
    per 1000 requests, exact McNemar against rules + 86M at 0.9 and the D1 decision, and
-   checks that each decision follows from its own records. The committed bundle,
+   checks that each decision follows from its own records. Before any metric, each run
+   must hold every case of its canonical corpus exactly once, with the corpus labels,
+   languages and file hash, and carry the frozen threshold, zone and judge settings;
+   judge use and cost count every request, errors included. The committed bundle,
    protocol, results, Markdown and chart rebuild with
    `deploy/semantic-sidecar/bench/reproduce-report.sh` without a model or a key.
 

@@ -2,10 +2,14 @@ package bench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,6 +35,7 @@ type fakeJev struct {
 	status  int
 	tokens  int64
 	served  string
+	body    string // when set, the exact 200 answer
 	headers []string
 	bodies  []string
 }
@@ -43,6 +48,10 @@ func (f *fakeJev) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.status != 0 && f.status != http.StatusOK {
 		w.WriteHeader(f.status)
 		_, _ = io.WriteString(w, `{"error":"upstream detail that must never be echoed","input":"secret echo"}`)
+		return
+	}
+	if f.body != "" {
+		_, _ = io.WriteString(w, f.body)
 		return
 	}
 	tokens := f.tokens
@@ -227,6 +236,96 @@ func TestJevProxyStopsWhenAnotherVersionIsServed(t *testing.T) {
 	}
 }
 
+func TestJevProxyKeepsTheWorstCaseWhenBillingIsUnknown(t *testing.T) {
+	for name, fake := range map[string]*fakeJev{
+		"5xx":           {status: http.StatusInternalServerError},
+		"invalid usage": {body: `{"model":"jev-1.14.0","answers":{"prompt_injection":{"type":"noul","noul":0.1}},"usage":{"input_tokens":-5}}`},
+		"unreadable":    {body: `not json`},
+	} {
+		upstream := httptest.NewServer(fake)
+		var ledger bytes.Buffer
+		proxy := newTestJevProxy(t, upstream, true, Budget{MaxCalls: 10, MaxUSD: 2.5 * WorstCaseUSD(), StopAfter: 2}, &ledger)
+		for _, text := range []string{"a", "b", "c"} {
+			post(t, proxy, "/v1/systemone", judgeBody(t, text))
+		}
+		stats, _ := proxy.Stats()
+		if fake.calls.Load() != 2 || stats.UnknownBillingUSD != 2*WorstCaseUSD() || stats.CostUSD != 0 || stats.StopReason == "" {
+			t.Fatalf("%s: calls %d, stats %+v", name, fake.calls.Load(), stats)
+		}
+		if strings.Count(ledger.String(), `"billing":"unknown"`) != 2 {
+			t.Fatalf("%s: every attempt must leave a ledger line: %q", name, ledger.String())
+		}
+		upstream.Close()
+	}
+}
+
+func TestJevProxyLedgersTransportFailures(t *testing.T) {
+	upstream := httptest.NewServer(http.NotFoundHandler())
+	upstream.Close() // every attempt fails before any answer
+	var ledger bytes.Buffer
+	proxy := newTestJevProxy(t, upstream, true, DefaultBudget, &ledger)
+	if response := post(t, proxy, "/v1/systemone", judgeBody(t, "a")); response.Code != http.StatusBadGateway {
+		t.Fatalf("status %d", response.Code)
+	}
+	stats, _ := proxy.Stats()
+	if strings.Count(ledger.String(), "\n") != 1 || stats.UnknownBillingUSD != WorstCaseUSD() {
+		t.Fatalf("ledger %q, stats %+v", ledger.String(), stats)
+	}
+}
+
+func TestJevProxyForwardsAndCachesOnlyTheReducedAnswer(t *testing.T) {
+	fake := &fakeJev{body: `{"model":"jev-1.14.0","answers":{"prompt_injection":{"type":"noul","noul":0.8,"explanation":"secret echo of the input"}},"usage":{"input_tokens":40,"output_tokens":2},"input":"secret echo"}`}
+	upstream := httptest.NewServer(fake)
+	defer upstream.Close()
+	dir := t.TempDir()
+	cache, err := NewCache(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := newJevProxy(JevProxyConfig{Live: true, Key: []byte(testKey), Upstream: upstream.URL + "/v1/systemone", Cache: cache, Budget: DefaultBudget, Client: upstream.Client()}, &tracer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := post(t, proxy, "/v1/systemone", judgeBody(t, "a"))
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "secret echo") || !strings.Contains(response.Body.String(), `"noul":0.8`) {
+		t.Fatalf("status %d, body %s", response.Code, response.Body.String())
+	}
+	if leaked := grepDir(t, dir, "secret echo"); leaked {
+		t.Fatal("the cache kept an upstream field the service does not need")
+	}
+	for name, body := range map[string]string{
+		"other question": `{"model":"jev-1.14.0","answers":{"other":{"type":"noul","noul":0.8}},"usage":{"input_tokens":4,"output_tokens":1}}`,
+		"out of range":   `{"model":"jev-1.14.0","answers":{"prompt_injection":{"type":"noul","noul":1.5}},"usage":{"input_tokens":4,"output_tokens":1}}`,
+		"other type":     `{"model":"jev-1.14.0","answers":{"prompt_injection":{"type":"score","score":0.5}},"usage":{"input_tokens":4,"output_tokens":1}}`,
+	} {
+		fake.body = body
+		if response := post(t, proxy, "/v1/systemone", judgeBody(t, name)); response.Code != http.StatusBadGateway {
+			t.Fatalf("%s: status %d, want 502", name, response.Code)
+		}
+	}
+}
+
+func TestJevModelsNeverFollowsRedirects(t *testing.T) {
+	var leaked atomic.Int32
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Add(1)
+		}
+		_, _ = io.WriteString(w, `{"models":[]}`)
+	}))
+	defer elsewhere.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/v1/models", http.StatusFound)
+	}))
+	defer redirect.Close()
+	if _, err := ListJevModels(context.Background(), &http.Client{}, redirect.URL+"/v1/models", []byte(testKey)); err == nil {
+		t.Fatal("a redirect was accepted")
+	}
+	if leaked.Load() != 0 {
+		t.Fatal("the key followed a redirect")
+	}
+}
+
 func TestSidecarProxyRecordsThenReplays(t *testing.T) {
 	var calls atomic.Int32
 	score := 0.25
@@ -263,4 +362,24 @@ func TestSidecarProxyRecordsThenReplays(t *testing.T) {
 	if _, drift := record.Stats(); drift != 1 {
 		t.Fatalf("drift = %d, want 1", drift)
 	}
+}
+
+// grepDir reports whether any file under dir contains needle.
+func grepDir(t *testing.T, dir, needle string) bool {
+	t.Helper()
+	found := false
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err == nil && bytes.Contains(data, []byte(needle)) {
+			found = true
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
 }

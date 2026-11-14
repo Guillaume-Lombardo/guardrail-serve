@@ -8,12 +8,14 @@ import (
 // testRun builds a bench-test run where decide(i) gives (rules, semantic) for case i.
 // Cases 0-9 are attacks, 10-29 benign texts.
 func testRun(id string, mode Mode, model string, threshold float64, decide func(i int) (bool, bool, float64)) RunFile {
-	run := RunFile{Format: RunFormat, Version: FormatVersion, RunID: id, Mode: mode, Model: model, Corpus: CorpusTest, ProtocolSHA256: "p"}
+	run := RunFile{Format: RunFormat, Version: FormatVersion, RunID: id, Mode: mode, Model: model, Corpus: CorpusTest, CorpusSHA256: "c", ProtocolSHA256: "p"}
 	if mode == ModeUnion || mode == ModeCascade {
 		run.SemanticThreshold = &threshold
 	}
 	if mode.usesJudge() {
-		run.Jev = &JevSettings{ProxyMode: "cache"}
+		settings := JevFixed
+		settings.ProxyMode = "cache"
+		run.Jev = &settings
 	}
 	for i := 0; i < 30; i++ {
 		rules, semantic, score := decide(i)
@@ -30,6 +32,31 @@ func testRun(id string, mode Mode, model string, threshold float64, decide func(
 		run.Cases = append(run.Cases, item)
 	}
 	return run
+}
+
+// testCorpora is the canonical corpus of testRun and a calibration stub.
+func testCorpora() map[string]*LoadedCorpus {
+	test := &LoadedCorpus{Name: CorpusTest, SHA256: "c"}
+	for i := 0; i < 30; i++ {
+		test.Cases = append(test.Cases, Case{ID: string(rune('A' + i)), Lang: "fr", Label: i < 10})
+	}
+	return map[string]*LoadedCorpus{CorpusTest: test, CorpusCalibration: {Name: CorpusCalibration, SHA256: "cal"}}
+}
+
+func testProtocol() *Protocol {
+	return &Protocol{
+		CalibrationSHA256: "cal", DefaultThreshold: DefaultThreshold,
+		Models: []ModelThreshold{{Name: CascadePrimary, Threshold: 0.95}, {Name: "pg2-22m", Threshold: 0.8}},
+		Jev:    frozenJev(),
+	}
+}
+
+func frozenJev() JevProtocol {
+	return JevProtocol{Model: JevFixed.Model, Question: JevFixed.Question, Threshold: JevFixed.Threshold, Timeout: JevFixed.Timeout, FailureMode: "closed"}
+}
+
+func report(runs ...RunFile) (*Results, error) {
+	return Report(&Bundle{Format: BundleFormat, Version: FormatVersion, ProtocolSHA256: "p", Runs: runs}, testProtocol(), "p", testCorpora())
 }
 
 func TestReportComputesD1AgainstTheReference(t *testing.T) {
@@ -51,8 +78,7 @@ func TestReportComputesD1AgainstTheReference(t *testing.T) {
 	})
 	judge := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return ruleHit(i), i < 9, 0 })
 	judge.Cases[29].Status, judge.Cases[29].ErrorKind, judge.Cases[29].Rules, judge.Cases[29].Semantic, judge.Cases[29].Decision = StatusError, "http_502", false, false, ""
-	bundle := &Bundle{Format: BundleFormat, Version: FormatVersion, ProtocolSHA256: "p", Runs: []RunFile{reference, better, judge}}
-	results, err := Report(bundle, &Protocol{}, "p")
+	results, err := report(reference, better, judge)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,19 +119,65 @@ func TestReportComputesD1AgainstTheReference(t *testing.T) {
 
 func TestReportRefusesInconsistentOrForeignRuns(t *testing.T) {
 	good := testRun("ref", ModeUnion, CascadePrimary, 0.9, func(i int) (bool, bool, float64) { return false, false, 0.1 })
-	bad := testRun("bad", ModeUnion, "pg2-22m", 0.9, func(i int) (bool, bool, float64) { return false, i == 0, 0.1 })
-	if _, err := Report(&Bundle{Format: BundleFormat, Version: FormatVersion, ProtocolSHA256: "p", Runs: []RunFile{good, bad}}, &Protocol{}, "p"); err == nil ||
-		!strings.Contains(err.Error(), "score >= threshold") {
+	bad := testRun("bad", ModeUnion, "pg2-22m", 0.8, func(i int) (bool, bool, float64) { return false, i == 0, 0.1 })
+	if _, err := report(good, bad); err == nil || !strings.Contains(err.Error(), "score >= threshold") {
 		t.Fatalf("inconsistent semantic decision: %v", err)
 	}
 	foreign := good
 	foreign.ProtocolSHA256 = "other"
-	if _, err := Report(&Bundle{Format: BundleFormat, Version: FormatVersion, ProtocolSHA256: "p", Runs: []RunFile{foreign}}, &Protocol{}, "p"); err == nil {
+	if _, err := report(foreign); err == nil {
 		t.Fatal("a run measured under another protocol was accepted")
 	}
 	judge := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
 	judge.Corpus = CorpusCalibration
-	if _, err := Report(&Bundle{Format: BundleFormat, Version: FormatVersion, ProtocolSHA256: "p", Runs: []RunFile{good, judge}}, &Protocol{}, "p"); err == nil {
+	if _, err := report(good, judge); err == nil {
 		t.Fatal("a judge run on calibration was accepted")
 	}
+}
+
+func TestReportRefusesRunsThatAreNotTheCanonicalCorpus(t *testing.T) {
+	reference := testRun("ref", ModeUnion, CascadePrimary, 0.9, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	// A candidate keeping one detected attack and one accepted benign text would
+	// otherwise reach 100% recall and 0 false positives.
+	partial := testRun("partial", ModeUnion, "pg2-22m", 0.8, func(i int) (bool, bool, float64) {
+		return false, i == 0, map[bool]float64{true: 0.9, false: 0.1}[i == 0]
+	})
+	partial.Cases = []CaseResult{partial.Cases[0], partial.Cases[20]}
+	repeated := testRun("repeated", ModeUnion, "pg2-22m", 0.8, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	repeated.Cases[1] = repeated.Cases[0]
+	relabelled := testRun("relabelled", ModeUnion, "pg2-22m", 0.8, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	relabelled.Cases[0].Label = false
+	otherVersion := testRun("other-version", ModeUnion, "pg2-22m", 0.8, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	otherVersion.CorpusSHA256 = "changed"
+	for _, run := range []RunFile{partial, repeated, relabelled, otherVersion} {
+		if _, err := report(reference, run); err == nil {
+			t.Fatalf("run %s was accepted", run.RunID)
+		}
+	}
+}
+
+func TestReportRefusesSettingsOutsideTheProtocol(t *testing.T) {
+	reference := testRun("ref", ModeUnion, CascadePrimary, 0.9, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	unfrozen := testRun("unfrozen", ModeUnion, "pg2-22m", 0.7, func(i int) (bool, bool, float64) { return false, false, 0.1 })
+	judge := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
+	judge.Jev.Threshold = 0.5
+	for _, run := range []RunFile{unfrozen, judge} {
+		if _, err := report(reference, run); err == nil {
+			t.Fatalf("run %s was accepted", run.RunID)
+		}
+	}
+	if err := testProtocol().CheckJev(JevSettings{Model: "jev-1.13.0", Question: "noul", Threshold: 0.7, Timeout: "10s"}); err == nil {
+		t.Fatal("another judge version was accepted")
+	}
+}
+
+func TestJudgeUseAndCostCountEveryRequest(t *testing.T) {
+	judge := testRun("judge", ModeJudge, "", 0, func(i int) (bool, bool, float64) { return false, false, 0 })
+	// A billed answer the service rejected: an error, still routed and paid.
+	judge.Cases[0].Status, judge.Cases[0].ErrorKind, judge.Cases[0].Decision, judge.Cases[0].JudgeCache = StatusError, "http_502", "", "live"
+	row := buildRow(&judge, ComponentJudge, ComponentJudge, "all")
+	if row.JudgeFraction.Num != 30 || row.JudgeFraction.Den != 30 || row.JudgeTokens != 30_000 {
+		t.Fatalf("judge use %+v, tokens %d", row.JudgeFraction, row.JudgeTokens)
+	}
+	near(t, "USD per 1000 requests", *row.USDPer1000, 1000*CostUSD(1000))
 }

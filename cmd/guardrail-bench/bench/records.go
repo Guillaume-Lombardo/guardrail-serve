@@ -98,8 +98,11 @@ type JudgeStats struct {
 	Failures      int     `json:"failures"`
 	InputTokens   int64   `json:"input_tokens"`
 	CostUSD       float64 `json:"cost_usd"`
-	BodyBytes     int64   `json:"body_bytes"`
-	StopReason    string  `json:"stop_reason,omitempty"`
+	// UnknownBillingUSD is the worst case kept as spent for attempts whose
+	// billing is unknown (transport failure, 5xx, unreadable answer).
+	UnknownBillingUSD float64 `json:"unknown_billing_usd"`
+	BodyBytes         int64   `json:"body_bytes"`
+	StopReason        string  `json:"stop_reason,omitempty"`
 }
 
 // CaseResult is the outcome of one case. It never contains text.

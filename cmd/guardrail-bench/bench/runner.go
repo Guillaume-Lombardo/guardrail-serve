@@ -96,6 +96,11 @@ func (c RunConfig) Validate() error {
 			return err
 		}
 	}
+	if c.Mode.usesJudge() {
+		if err := c.Protocol.CheckJev(JevFixed); err != nil {
+			return err
+		}
+	}
 	if c.Mode == ModeCascade && (c.Zone.Lower != c.Protocol.Zone.Lower || c.Zone.Upper != c.Protocol.Zone.Upper || c.Threshold != c.Protocol.Zone.Upper) {
 		return errors.New("the cascade must use the frozen zone and its upper bound as threshold")
 	}
@@ -111,6 +116,11 @@ func Run(ctx context.Context, cfg RunConfig) (*RunFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	return runCorpus(ctx, cfg, corpus)
+}
+
+// runCorpus evaluates the cases of an already loaded corpus.
+func runCorpus(ctx context.Context, cfg RunConfig, corpus *LoadedCorpus) (*RunFile, error) {
 	trace := &tracer{}
 	env := map[string]string{"SEMANTIC_ENABLED": "false"}
 	run := &RunFile{

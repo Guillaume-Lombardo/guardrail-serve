@@ -23,6 +23,10 @@ type JevModel struct {
 
 // ListJevModels calls GET /v1/models. Errors carry the status only, never the body.
 func ListJevModels(ctx context.Context, client *http.Client, url string, key []byte) ([]JevModel, error) {
+	// Never follow a redirect: it could carry the key to another host.
+	noFollow := *client
+	noFollow.CheckRedirect = noRedirect
+	client = &noFollow
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

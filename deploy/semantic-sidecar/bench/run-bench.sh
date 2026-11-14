@@ -81,6 +81,13 @@ run_live() { # model corpus threshold-source run-id
     -run-id "$id" -out "$OUT/$id.json" -log "$OUT/$id.log"
 }
 
+require_frozen() { # the protocol used must be byte-identical to the committed blob
+  local rel=deploy/semantic-sidecar/bench/results/protocol.json
+  git -C "$ROOT" cat-file -e "HEAD:$rel" 2>/dev/null || { echo "commit protocol.json first" >&2; exit 1; }
+  git -C "$ROOT" diff --quiet HEAD -- "$rel" || { echo "protocol.json differs from its commit" >&2; exit 1; }
+  git -C "$ROOT" show "HEAD:$rel" | cmp -s - "$RESULTS/protocol.json" || { echo "protocol.json differs from its commit" >&2; exit 1; }
+}
+
 phase=${1:-}
 mkdir -p "$OUT" "$RESULTS"
 case $phase in
@@ -100,7 +107,7 @@ case $phase in
     bench calibrate -rules "$OUT/calibration-rules.json" -out "$RESULTS/protocol.json" \
       $(for model in "${MODELS[@]}"; do echo "$OUT/calibration-$model.json"; done) ;;
   test)
-    git -C "$ROOT" ls-files --error-unmatch "$RESULTS/protocol.json" >/dev/null || { echo "commit protocol.json first" >&2; exit 1; }
+    require_frozen
     for corpus in bench-test "${HISTORY[@]}"; do
       bench run -root "$ROOT" -mode rules -corpus "$corpus" -protocol "$RESULTS/protocol.json" -cache-dir "$CACHE" \
         -run-id "$corpus-rules" -out "$OUT/$corpus-rules.json"
@@ -117,17 +124,20 @@ case $phase in
         -protocol "$RESULTS/protocol.json" -cache-dir "$CACHE" -run-id "$corpus-pg2-86m-current" -out "$OUT/$corpus-pg2-86m-current.json"
     done ;;
   judge)
+    require_frozen
     # The key arrives on file descriptor 3 (never an argument, never the environment), read
     # once. The proxy stops paid traffic if the API serves another version than jev-1.14.0;
     # check the name beforehand with `guardrail-bench jev-probe` (one capped call).
     bench run -root "$ROOT" -mode judge -corpus bench-test -protocol "$RESULTS/protocol.json" -cache-dir "$CACHE" \
       -jev-live -jev-key-file /dev/fd/3 -run-id bench-test-jev -out "$OUT/bench-test-jev.json" -log "$OUT/bench-test-jev.log" ;;
   cascade)
+    require_frozen
     bench run -root "$ROOT" -mode cascade -model pg2-86m -corpus bench-test -replay-delay -protocol "$RESULTS/protocol.json" \
       -cache-dir "$CACHE" -run-id bench-test-cascade-replay -out "$OUT/bench-test-cascade-replay.json" -log "$OUT/bench-test-cascade-replay.log"
     bench run -root "$ROOT" -mode cascade -model pg2-86m -corpus bench-test -protocol "$RESULTS/protocol.json" \
       -cache-dir "$CACHE" -run-id bench-test-cascade-warm -out "$OUT/bench-test-cascade-warm.json" ;;
   report)
+    require_frozen
     "$BIN" export -protocol "$RESULTS/protocol.json" -out "$RESULTS/runs.json" "$OUT"/*.json
     "$BENCH/reproduce-report.sh" ;;
   *)

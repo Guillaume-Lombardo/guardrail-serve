@@ -70,6 +70,7 @@ type LedgerLine struct {
 	SpentUSD    float64 `json:"spent_usd"`
 	MS          float64 `json:"ms"`
 	BodyBytes   int     `json:"body_bytes"`
+	Billing     string  `json:"billing"`
 }
 
 // Egress leak guard: independent of the service's masking patterns, it
@@ -123,6 +124,7 @@ type JevProxy struct {
 	mu          sync.Mutex
 	stats       JudgeStats
 	consecutive int
+	inflightUSD float64
 	leaks       map[string]int
 }
 
@@ -280,20 +282,25 @@ func (p *JevProxy) fail(fn func(*JudgeStats)) {
 }
 
 // call sends one paid request after checking the budget. Upstream bodies are
-// never echoed: errors carry the status code only.
+// never echoed: errors carry the status code only. The worst case of the call
+// is reserved before sending; when the billing of an attempt cannot be known
+// (transport failure, 5xx, unreadable 200 or invalid usage) the reservation is
+// kept as spent, so an unknown outcome can never let the budget drift.
 func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (JevEntry, int, error) {
+	worst := WorstCaseUSD()
 	p.mu.Lock()
 	switch {
 	case p.stats.StopReason != "":
+		p.stats.Refused++
+		reason := p.stats.StopReason
 		p.mu.Unlock()
-		p.fail(func(s *JudgeStats) { s.Refused++ })
-		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: " + p.stats.StopReason)
+		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: " + reason)
 	case p.stats.Upstream >= p.budget.MaxCalls:
 		p.stats.StopReason = fmt.Sprintf("call cap %d reached", p.budget.MaxCalls)
 		p.stats.Refused++
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: call cap")
-	case p.stats.CostUSD+WorstCaseUSD() > p.budget.MaxUSD:
+	case p.stats.CostUSD+p.stats.UnknownBillingUSD+p.inflightUSD+worst > p.budget.MaxUSD:
 		p.stats.StopReason = fmt.Sprintf("worst-case cost would exceed USD %.2f", p.budget.MaxUSD)
 		p.stats.Refused++
 		p.mu.Unlock()
@@ -301,10 +308,31 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 	}
 	p.stats.Upstream++
 	p.stats.BodyBytes += int64(len(body))
+	p.inflightUSD += worst
 	p.mu.Unlock()
+
+	// Every attempt leaves one text-free ledger line and settles its reservation.
+	line := LedgerLine{Time: p.now().UTC().Format(time.RFC3339), Key: key[:16], BodyBytes: len(body), Billing: BillingUnknown}
+	defer func() {
+		p.mu.Lock()
+		p.inflightUSD -= worst
+		switch line.Billing {
+		case BillingKnown:
+			p.stats.InputTokens += line.InputTokens
+			p.stats.CostUSD += line.CostUSD
+		case BillingUnknown:
+			p.stats.UnknownBillingUSD += worst
+			line.CostUSD = worst
+		}
+		line.SpentUSD = p.stats.CostUSD + p.stats.UnknownBillingUSD
+		p.mu.Unlock()
+		encoded, _ := json.Marshal(line)
+		_, _ = p.ledger.Write(append(encoded, '\n'))
+	}()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.upstream, bytes.NewReader(body))
 	if err != nil {
+		line.Billing = BillingNone
 		p.fail(func(s *JudgeStats) { s.Failures++ })
 		return JevEntry{}, http.StatusBadGateway, errors.New("cannot build upstream request")
 	}
@@ -315,27 +343,23 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 	started := p.now()
 	response, err := p.client.Do(request)
 	if err != nil {
+		line.MS = float64(p.now().Sub(started).Microseconds()) / 1000
 		p.fail(func(s *JudgeStats) { s.Failures++ })
 		return JevEntry{}, http.StatusBadGateway, errors.New("upstream transport failure")
 	}
 	defer response.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, maxProxyBody+1))
 	elapsed := float64(p.now().Sub(started).Microseconds()) / 1000
-	line := LedgerLine{Time: p.now().UTC().Format(time.RFC3339), Key: key[:16], Status: response.StatusCode, MS: elapsed, BodyBytes: len(body)}
-	defer func() {
-		p.mu.Lock()
-		line.SpentUSD = p.stats.CostUSD
-		p.mu.Unlock()
-		encoded, _ := json.Marshal(line)
-		_, _ = p.ledger.Write(append(encoded, '\n'))
-	}()
+	line.Status, line.MS = response.StatusCode, elapsed
 
-	switch response.StatusCode {
-	case http.StatusOK:
-	case http.StatusUnauthorized:
+	switch {
+	case response.StatusCode == http.StatusOK:
+	case response.StatusCode == http.StatusUnauthorized:
+		line.Billing = BillingNone
 		p.stop("upstream 401: key refused")
 		return JevEntry{}, http.StatusUnauthorized, errors.New("upstream status 401")
-	case http.StatusPaymentRequired, http.StatusTooManyRequests:
+	case response.StatusCode == http.StatusPaymentRequired || response.StatusCode == http.StatusTooManyRequests:
+		line.Billing = BillingNone
 		p.mu.Lock()
 		p.consecutive++
 		if p.consecutive >= p.budget.StopAfter {
@@ -344,37 +368,97 @@ func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (Je
 		p.stats.Failures++
 		p.mu.Unlock()
 		return JevEntry{}, response.StatusCode, fmt.Errorf("upstream status %d", response.StatusCode)
-	default:
+	case response.StatusCode >= 400 && response.StatusCode < 500:
+		// A documented client error refuses the request before inference.
+		line.Billing = BillingNone
 		p.fail(func(s *JudgeStats) { s.Failures++ })
 		return JevEntry{}, response.StatusCode, fmt.Errorf("upstream status %d", response.StatusCode)
+	default:
+		p.fail(func(s *JudgeStats) { s.Failures++ })
+		return JevEntry{}, http.StatusBadGateway, fmt.Errorf("upstream status %d", response.StatusCode)
 	}
-	var decoded struct {
-		Model   string                     `json:"model"`
-		Answers map[string]json.RawMessage `json:"answers"`
-		Usage   map[string]int64           `json:"usage"`
-	}
-	if readErr != nil || len(data) > maxProxyBody || json.Unmarshal(data, &decoded) != nil || decoded.Usage == nil {
+	if readErr != nil || len(data) > maxProxyBody {
 		p.fail(func(s *JudgeStats) { s.Failures++ })
 		return JevEntry{}, http.StatusBadGateway, errors.New("upstream answer is not the documented object")
 	}
-	tokens := decoded.Usage["input_tokens"]
-	cost := CostUSD(tokens)
-	line.InputTokens, line.CostUSD = tokens, cost
+	var decoded jevResponse
+	if json.Unmarshal(data, &decoded) != nil || decoded.Usage.InputTokens == nil || *decoded.Usage.InputTokens < 0 {
+		p.fail(func(s *JudgeStats) { s.Failures++ })
+		return JevEntry{}, http.StatusBadGateway, errors.New("upstream answer is not the documented object")
+	}
+	line.Billing = BillingKnown
+	line.InputTokens = *decoded.Usage.InputTokens
+	line.CostUSD = CostUSD(line.InputTokens)
 	p.mu.Lock()
 	p.consecutive = 0
-	p.stats.InputTokens += tokens
-	p.stats.CostUSD += cost
 	p.mu.Unlock()
 	if decoded.Model != model {
 		// A different version would be measured under the pinned name: stop, keep nothing.
 		p.stop("upstream served another model version")
 		return JevEntry{}, http.StatusBadGateway, errors.New("upstream served another model version")
 	}
-	entry := JevEntry{Model: decoded.Model, Answers: decoded.Answers, Usage: decoded.Usage, UpstreamMS: elapsed}
+	entry, err := reduceAnswer(decoded, body, elapsed)
+	if err != nil {
+		p.fail(func(s *JudgeStats) { s.Failures++ })
+		return JevEntry{}, http.StatusBadGateway, err
+	}
 	if err := p.cache.Put(key, entry); err != nil {
 		return JevEntry{}, http.StatusInternalServerError, errors.New("cache failure")
 	}
 	return entry, http.StatusOK, nil
+}
+
+// Billing states of a ledger line.
+const (
+	BillingKnown   = "known"   // usage reported: the input tokens are billed
+	BillingNone    = "none"    // refused before inference (4xx): nothing billed
+	BillingUnknown = "unknown" // outcome unknown: the worst case is counted as spent
+)
+
+type jevResponse struct {
+	Model   string                     `json:"model"`
+	Answers map[string]json.RawMessage `json:"answers"`
+	Usage   struct {
+		InputTokens  *int64 `json:"input_tokens"`
+		OutputTokens *int64 `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+// reduceAnswer keeps only what the service decodes: the one asked question and
+// its noul probability in [0, 1]. Any other upstream field (an explanation, an
+// echo of the input) is dropped before the answer is cached or forwarded.
+func reduceAnswer(decoded jevResponse, body []byte, elapsed float64) (JevEntry, error) {
+	var request jevRequest
+	if err := json.Unmarshal(body, &request); err != nil || len(request.Questions) != 1 {
+		return JevEntry{}, errors.New("judge request must ask exactly one question")
+	}
+	var name string
+	for question := range request.Questions {
+		name = question
+	}
+	raw, ok := decoded.Answers[name]
+	if !ok || len(decoded.Answers) != 1 {
+		return JevEntry{}, errors.New("upstream answer does not match the asked question")
+	}
+	var answer struct {
+		Type string   `json:"type"`
+		Noul *float64 `json:"noul"`
+	}
+	if json.Unmarshal(raw, &answer) != nil || answer.Type != "noul" || answer.Noul == nil || *answer.Noul < 0 || *answer.Noul > 1 {
+		return JevEntry{}, errors.New("upstream answer is not a noul probability")
+	}
+	reduced, err := json.Marshal(struct {
+		Type string  `json:"type"`
+		Noul float64 `json:"noul"`
+	}{"noul", *answer.Noul})
+	if err != nil {
+		return JevEntry{}, err
+	}
+	usage := map[string]int64{"input_tokens": *decoded.Usage.InputTokens}
+	if decoded.Usage.OutputTokens != nil && *decoded.Usage.OutputTokens >= 0 {
+		usage["output_tokens"] = *decoded.Usage.OutputTokens
+	}
+	return JevEntry{Model: decoded.Model, Answers: map[string]json.RawMessage{name: reduced}, Usage: usage, UpstreamMS: elapsed}, nil
 }
 
 func (p *JevProxy) stop(reason string) {

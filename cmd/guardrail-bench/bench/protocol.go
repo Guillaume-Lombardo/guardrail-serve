@@ -99,6 +99,44 @@ func (p *Protocol) AllowedThreshold(name string, threshold float64) error {
 	return fmt.Errorf("threshold %g for %s is not frozen (allowed: %g)", threshold, name, model.Threshold)
 }
 
+// CheckJev refuses judge settings that differ from the frozen judge question.
+func (p *Protocol) CheckJev(settings JevSettings) error {
+	j := p.Jev
+	if settings.Model != j.Model || settings.Question != j.Question || settings.Threshold != j.Threshold ||
+		settings.Timeout != j.Timeout || j.FailureMode != "closed" {
+		return fmt.Errorf("judge settings %s/%s/%g/%s differ from the frozen protocol", settings.Model, settings.Question, settings.Threshold, settings.Timeout)
+	}
+	return nil
+}
+
+// CheckRun refuses a measured run whose recorded threshold, zone or judge
+// settings are not the frozen ones. Calibration runs precede the protocol.
+func (p *Protocol) CheckRun(run *RunFile) error {
+	if run.Corpus == CorpusCalibration {
+		return nil
+	}
+	if run.Mode.usesSidecar() {
+		if run.SemanticThreshold == nil {
+			return fmt.Errorf("run %s has no recorded threshold", run.RunID)
+		}
+		if err := p.AllowedThreshold(run.Model, *run.SemanticThreshold); err != nil {
+			return fmt.Errorf("run %s: %w", run.RunID, err)
+		}
+	}
+	if run.Mode.usesJudge() {
+		if run.Jev == nil {
+			return fmt.Errorf("run %s has no recorded judge settings", run.RunID)
+		}
+		if err := p.CheckJev(*run.Jev); err != nil {
+			return fmt.Errorf("run %s: %w", run.RunID, err)
+		}
+	}
+	if run.Mode == ModeCascade && (run.Zone == nil || run.Zone.Lower != p.Zone.Lower || run.Zone.Upper != p.Zone.Upper || *run.SemanticThreshold != p.Zone.Upper) {
+		return fmt.Errorf("run %s did not use the frozen gray zone", run.RunID)
+	}
+	return nil
+}
+
 // scored is one calibration case reduced to what the rules need.
 type scored struct {
 	label bool

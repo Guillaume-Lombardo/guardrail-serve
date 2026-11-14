@@ -293,6 +293,7 @@ func reportCommand(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("report", flag.ContinueOnError)
 	bundlePath := flags.String("bundle", "", "exported runs")
 	protocolPath := flags.String("protocol", "", "frozen protocol")
+	root := flags.String("root", ".", "repository root (canonical corpora)")
 	out := flags.String("out", "", "results JSON to write")
 	markdown := flags.String("markdown", "", "Markdown tables to write (optional)")
 	if err := flags.Parse(args); err != nil {
@@ -309,7 +310,15 @@ func reportCommand(args []string, stdout io.Writer) error {
 	if err := bench.ReadJSON(*bundlePath, &bundle); err != nil {
 		return err
 	}
-	results, err := bench.Report(&bundle, protocol, sha)
+	corpora := map[string]*bench.LoadedCorpus{}
+	for _, name := range bench.CorpusNames() {
+		corpus, err := bench.LoadCorpus(*root, name)
+		if err != nil {
+			return err
+		}
+		corpora[name] = corpus
+	}
+	results, err := bench.Report(&bundle, protocol, sha, corpora)
 	if err != nil {
 		return err
 	}
