@@ -357,9 +357,14 @@ conditions as other requests. Configure the scraper's credentials accordingly.
 | --- | --- |
 | `guardrail_executions_total` | Completed policy evaluations and actual detector invocations |
 | `guardrail_execution_duration_seconds` | Duration histogram for those same executions, in seconds (default Prometheus buckets) |
+| `guardrail_systemone_routes_total{route}` | Cascade evaluations by deciding route: `judged`, `below_zone`, `above_zone`, `primary_failure`, `empty` |
+| `guardrail_systemone_judgments_total{outcome}` | System One judgments per text: `success` or a failure kind (`masking_failed` and `text_too_large` send nothing) |
+| `guardrail_systemone_judgment_duration_seconds{outcome}` | Judgment duration histogram, masking included |
+| `guardrail_systemone_input_tokens_total` | Billable input tokens reported by successful responses |
 
-Both use labels `policy`, `mode`, `stage`, `detector`, `action`, `decision` and
-`outcome`. `detector="none"` identifies a complete policy evaluation; its
+The two execution metrics use labels `policy`, `mode`, `stage`, `detector`,
+`action`, `decision` and `outcome`; the System One metrics use only the fixed
+enumerations shown. `detector="none"` identifies a complete policy evaluation; its
 `action="none"` and `decision` is the applied `NONE`, `BLOCKED` or
 `GUARDRAIL_INTERVENED` (`none` on error). Detector series have `decision="none"`,
 configured action `mask`, `block` or `annotate`, and count once per text and chain
@@ -621,6 +626,70 @@ between micro-batches, so one micro-batch can overrun it) and a request the clie
 abandoned can keep a serialized sidecar busy. Measurements, formulas and caveats:
 [sidecar README](deploy/semantic-sidecar/README.md#measured-results-and-limits).
 The Compose stack attaches the sidecar only to an `internal: true` network.
+
+### Optional System One judge (L12a)
+
+`semantic_prompt_injection` can ask TypeSafe's
+[System One API](https://docs.typesafe.ai/api/system-one.md) (model Jev) for a
+second opinion. It is disabled by default and contacts no network when disabled.
+The client asks one typed question (`noul`, `choice` or `score`) with fixed,
+compiled-in wording; the scanned text is sent only as data in
+`state.untrusted_text`. Answers are validated strictly (question name and type,
+finite probabilities in [0, 1], option and level sets, sums within 0.05 of 1,
+bounded 64 KiB body); anything else is a typed failure, never a score. Design and
+primary references: [ADR 0021](docs/adr/0021-systemone-gray-zone-judge.md) and the
+[package README](internal/semantic/systemone/README.md).
+
+**Modes.** `cascade` (requires `SEMANTIC_ENABLED=true`) scores every text with the
+sidecar and asks the judge only when the sidecar score `s` satisfies
+`SYSTEMONE_ZONE_LOWER <= s <= SYSTEMONE_ZONE_UPPER` (both bounds inclusive).
+Outside the zone the sidecar decides and no judge request is made. A sidecar
+failure is never read as a score of 0: the judge is not called and
+`SEMANTIC_FAILURE_MODE` applies. `judge_only` (requires `SEMANTIC_ENABLED=false`)
+judges every non-blank text, for measurement. Both keep the detector name, so
+policies do not change; a judge decision reports rule `systemone_judge`.
+
+**Masking is mandatory.** Before any request, each text is masked by an internal
+policy (not part of the catalog, never containing a semantic detector) with
+`detect_secret` and `detect_pii` and typed masks such as `[EMAIL]`, plus a
+judge-only Unicode email rule. It always includes the embedded default rules and,
+with `GUARDRAILS_CONFIG_DIR`, the operator rules too: overrides add coverage, never
+remove it. If masking fails or the masked text exceeds `SYSTEMONE_MAX_TEXT_RUNES`,
+nothing is sent in either failure mode. Findings keep original positions (whole
+original text) and client texts are never rewritten by the judge. **Coverage is
+bounded:** native secret rules and entropy, email, French phone numbers, IBAN,
+IPv4, payment cards, NIR, SIREN and SIRET. Names, postal addresses, other phone
+formats and free-form identifiers are not masked; this reduces exposure, it does
+not guarantee that no personal data leaves.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SYSTEMONE_ENABLED` | `false` | Boolean |
+| `SYSTEMONE_MODE` | `cascade` | `cascade` or `judge_only` |
+| `SYSTEMONE_BASE_URL` | empty | Required when enabled. `https` (http only for loopback), no credentials, query or fragment; requests go to `<base>/v1/systemone`, so a gateway path prefix works |
+| `SYSTEMONE_MODEL` | empty | Required when enabled, for example `jev-1.14.0`; pin a versioned ID once thresholds are tuned (aliases move) |
+| `SYSTEMONE_API_KEY_FILE` | empty | File holding the key (preferred); exactly one of the two key variables is required when enabled |
+| `SYSTEMONE_API_KEY` | empty | Key value; never logged or echoed |
+| `SYSTEMONE_QUESTION` | `noul` | `noul`, `choice` (probability of option `injection`) or `score` (probability of the top level) |
+| `SYSTEMONE_THRESHOLD` | `0.7` | Probability in (0, 1]; equality triggers. Starting point from the Noul docs, not calibrated |
+| `SYSTEMONE_ZONE_LOWER` / `SYSTEMONE_ZONE_UPPER` | empty | Required in `cascade`; in [0, 1], lower <= upper, inclusive |
+| `SYSTEMONE_TIMEOUT` | `3s` | Per text; adds to `SEMANTIC_TIMEOUT` in cascade, keep `HTTP_WRITE_TIMEOUT` above both |
+| `SYSTEMONE_FAILURE_MODE` | `closed` | `closed`: 502; `open`: the text passes and `semantic classifier degraded` is logged |
+| `SYSTEMONE_MAX_TEXT_RUNES` | `20000` | Larger masked texts fail without being sent |
+
+The key is sent only as `Authorization: Bearer` to the configured host: no
+redirect is followed, environment proxies are ignored, and caller headers are
+never forwarded. Errors and logs carry a failure kind (`unauthorized`,
+`payment_required`, `rate_limited`, `overloaded`, `timeout`, `masking_failed`,
+`invalid_probability`, ...) and at most a status code. There is no retry.
+
+**Cost and limits** (primary sources, read 14/11/2026): USD 0.042 per million
+input tokens, output free, prepaid credits; an exhausted balance returns 402
+([pricing](https://help.typesafe.ai/articles/5187202169-how-much-does-jev-cost)).
+Default rate limits are 100k tokens/s and 80 requests/s per organization; the
+context is 64k tokens per request ([models](https://docs.typesafe.ai/models.md)).
+The public API has no balance endpoint (`/v1/models` and `/v1/systemone` only), so
+watch `guardrail_systemone_input_tokens_total` and 402 outcomes.
 
 ### Native secret detection
 

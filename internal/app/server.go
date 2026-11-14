@@ -82,16 +82,13 @@ func NewHandlerWithRegistry(cfg config.Config, logger *slog.Logger, registry *pr
 	}
 	detectors := map[string]domain.Detector{secret.Name(): secret, pii.Name(): pii, prompt.Name(): prompt}
 
-	classifier, err := cfg.Semantic.NewClassifier()
+	judgeObserver := &observerSlot{}
+	semanticPolicy, err := semanticDetector(cfg, logger, secret, pii, judgeObserver)
 	if err != nil {
-		return nil, fmt.Errorf("semantic detector configuration: %w", err)
+		return nil, err
 	}
-	if classifier != nil {
-		detector, err := guardrails.NewSemanticPolicyDetector(classifier, logger)
-		if err != nil {
-			return nil, err
-		}
-		detectors[detector.Name()] = detector
+	if semanticPolicy != nil {
+		detectors[semanticPolicy.Name()] = semanticPolicy
 	}
 
 	defaultMask := policy.LiteralMask(cfg.SecretMask)
@@ -124,6 +121,7 @@ func NewHandlerWithRegistry(cfg config.Config, logger *slog.Logger, registry *pr
 	if err != nil {
 		return nil, fmt.Errorf("register metrics: %w", err)
 	}
+	judgeObserver.target = metrics
 	engine := policy.NewEngineWithObserver(guardrails.NewMaxLengthGuardrail(cfg.MaxTextItems, cfg.MaxTextChars), metrics)
 	apiHandler := httpapi.NewHandler(cfg, logger, engine, catalog, scan)
 

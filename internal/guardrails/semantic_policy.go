@@ -45,7 +45,7 @@ func (d *SemanticPolicyDetector) Detect(ctx context.Context, text string) ([]dom
 	if err != nil {
 		return nil, err
 	}
-	if degraded, _ := a.Metadata["classifier_degraded"].(bool); degraded {
+	if degraded, _ := a.Metadata[semantic.MetadataDegraded].(bool); degraded {
 		// Deliberately fixed fields: provider metadata cannot create log cardinality
 		// or leak a response body, URL, label, model name or input value.
 		d.logger.WarnContext(ctx, "semantic classifier degraded", "detector", d.Name(), "failure_mode", "open")
@@ -55,5 +55,10 @@ func (d *SemanticPolicyDetector) Detect(ctx context.Context, text string) ([]dom
 		return nil, nil
 	}
 	score := a.Score
-	return []domain.Detection{{Rule: "semantic_classification", Type: "PROMPT_INJECTION", Start: 0, End: len(text), Score: &score}}, nil
+	// Only allowlisted rules leave the assessment; anything else is the default.
+	rule := semantic.RuleClassification
+	if value, _ := a.Metadata[semantic.MetadataRule].(string); value == semantic.RuleSystemOneJudge {
+		rule = value
+	}
+	return []domain.Detection{{Rule: rule, Type: "PROMPT_INJECTION", Start: 0, End: len(text), Score: &score}}, nil
 }
