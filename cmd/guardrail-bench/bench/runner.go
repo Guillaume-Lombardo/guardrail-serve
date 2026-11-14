@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -421,6 +422,16 @@ func hostEnvironment(root string) Environment {
 			if name, value, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(name) == "model name" {
 				env.CPUModel = strings.TrimSpace(value)
 				break
+			}
+		}
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				env.BinaryRevision = setting.Value
+			case "vcs.modified":
+				env.BinaryModified = setting.Value == "true"
 			}
 		}
 	}

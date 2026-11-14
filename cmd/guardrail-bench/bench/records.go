@@ -73,6 +73,10 @@ type Environment struct {
 	LoadAfter  string `json:"load_after"`
 	Commit     string `json:"commit"`
 	Dirty      bool   `json:"dirty"`
+	// BinaryRevision and BinaryModified come from the bench binary's embedded
+	// VCS stamp: the code that measured, which may predate the checkout HEAD.
+	BinaryRevision string `json:"binary_revision,omitempty"`
+	BinaryModified bool   `json:"binary_modified,omitempty"`
 }
 
 // SidecarStats counts proxy traffic to the classifier.
