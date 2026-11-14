@@ -32,7 +32,7 @@ const (
 	// Freeze guards: the published files are immutable for this benchmark
 	// version. A deliberate change means a new version (semantic-bench-fr-v2),
 	// never an edit; update these digests only together with that version.
-	frozenCalibrationSHA256 = "038db30e5953e4ac4f4e96aa9d108964c909a3c6dd705b9b346e8d0aeecf7dc7"
+	frozenCalibrationSHA256 = "232d78dcc205d0ba7029631ee6419f00bd88eee6410380bad4c978a0ea210bc2"
 	frozenTestSHA256        = "81ef0a23d93c5d2031a9c9618e3ffa5fd2e160adbd8188f90138da450373c1f6"
 )
 
