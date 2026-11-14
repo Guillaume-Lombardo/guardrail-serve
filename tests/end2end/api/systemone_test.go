@@ -69,6 +69,7 @@ type judgeHarness struct {
 	primaryErr int       // status returned instead, when non-zero
 	judgeValue string
 	judgeErr   int
+	judgeHold  bool // the judge answers only when the request is cancelled
 	requests   []judgeRequest
 	sidecar    *httptest.Server
 	judge      *httptest.Server
@@ -98,8 +99,12 @@ func newJudgeHarness(t *testing.T, mutate func(*config.Config)) *judgeHarness {
 		body, _ := io.ReadAll(r.Body)
 		h.mu.Lock()
 		h.requests = append(h.requests, judgeRequest{r.Method, r.URL.String(), r.Header.Clone(), body})
-		status, value := h.judgeErr, h.judgeValue
+		status, value, hold := h.judgeErr, h.judgeValue, h.judgeHold
 		h.mu.Unlock()
+		if hold {
+			<-r.Context().Done()
+			return
+		}
 		if status != 0 {
 			w.WriteHeader(status)
 			_, _ = io.WriteString(w, `{"detail":"provider detail `+judgeKey+`"}`)
@@ -375,19 +380,16 @@ func TestSystemOneJudgeOnlyAndFailures(t *testing.T) {
 	}
 	h.assertNoLeak(raw)
 
-	// A literal U+FFFD makes the secret detector fail closed: masking fails, so
-	// nothing is sent, in both failure modes.
+	// A literal U+FFFD makes the secret detector fail: masking fails, nothing is
+	// sent, and the request fails closed even in open mode (the caller provoked it).
 	for _, mode := range []httpclassifier.FailureMode{httpclassifier.FailClosed, httpclassifier.FailOpen} {
 		h := newJudgeHarness(t, judgeOnly(mode))
 		status, _, raw, body := h.post("/v1/guardrails/judged", "request", "bad � "+sensitiveValues[3])
 		if len(h.judgeRequests()) != 0 {
 			t.Fatalf("%s: masking failure must not send", mode)
 		}
-		if mode == httpclassifier.FailClosed && status != 502 {
-			t.Fatalf("closed: %d %s", status, raw)
-		}
-		if mode == httpclassifier.FailOpen && (status != 200 || body["decision"] != "NONE") {
-			t.Fatalf("open: %d %s", status, raw)
+		if status != 502 || body["detail"] != "Guardrail execution failed." {
+			t.Fatalf("%s: %d %s", mode, status, raw)
 		}
 		if !strings.Contains(h.metrics(), `guardrail_systemone_judgments_total{outcome="masking_failed"} 1`) {
 			t.Fatal("masking failure metric missing")
@@ -408,6 +410,31 @@ func TestSystemOneJudgeOnlyAndFailures(t *testing.T) {
 		}
 		h.assertNoLeak(raw)
 	}
+}
+
+// TestSystemOneRequestDeadlineBoundsPaidCalls checks that judge calls stop at
+// the request deadline (HTTP_WRITE_TIMEOUT) instead of running sequentially
+// for every text after the response can no longer be delivered.
+func TestSystemOneRequestDeadlineBoundsPaidCalls(t *testing.T) {
+	h := newJudgeHarness(t, func(cfg *config.Config) {
+		cfg.Semantic = config.Semantic{}
+		cfg.SystemOne.Mode = systemone.ModeJudgeOnly
+		cfg.SystemOne.Judge.FailureMode = httpclassifier.FailOpen
+		cfg.Runtime.WriteTimeout = 300 * time.Millisecond
+		cfg.SystemOne.Judge.Timeout = 10 * time.Second
+	})
+	h.mu.Lock()
+	h.judgeHold = true
+	h.mu.Unlock()
+	started := time.Now()
+	status, _, raw, _ := h.post("/v1/guardrails/judged", "request", "first text", "second text", "third text")
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("request ran past its deadline: %s", elapsed)
+	}
+	if status != 502 || len(h.judgeRequests()) != 1 {
+		t.Fatalf("deadline must stop judging: %d, %d judge requests, %s", status, len(h.judgeRequests()), raw)
+	}
+	h.assertNoLeak(raw)
 }
 
 func TestSystemOneMetricsAreBoundedAndValueFree(t *testing.T) {

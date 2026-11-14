@@ -191,7 +191,7 @@ Transport limits are independent of text limits:
 | --- | --- | --- |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time to read request headers |
 | `HTTP_READ_TIMEOUT` | `15s` | Time to read the complete request, including its body |
-| `HTTP_WRITE_TIMEOUT` | `30s` | Response write deadline |
+| `HTTP_WRITE_TIMEOUT` | `30s` | Response write deadline; also the request deadline that cancels pending detector calls |
 | `HTTP_IDLE_TIMEOUT` | `60s` | Keep-alive idle deadline |
 | `HTTP_SHUTDOWN_TIMEOUT` | `10s` | Graceful drain deadline after SIGTERM or SIGINT |
 | `HTTP_MAX_BODY_BYTES` | `1048576` | Maximum encoded request body size in bytes |
@@ -652,10 +652,12 @@ policies do not change; a judge decision reports rule `systemone_judge`.
 **Masking is mandatory.** Before any request, each text is masked by an internal
 policy (not part of the catalog, never containing a semantic detector) with
 `detect_secret` and `detect_pii` and typed masks such as `[EMAIL]`, plus a
-judge-only Unicode email rule. It always includes the embedded default rules and,
+judge-only Unicode email rule (quoted local parts and IP-literal domains are not
+covered). It always includes the embedded default rules and,
 with `GUARDRAILS_CONFIG_DIR`, the operator rules too: overrides add coverage, never
 remove it. If masking fails or the masked text exceeds `SYSTEMONE_MAX_TEXT_RUNES`,
-nothing is sent in either failure mode. Findings keep original positions (whole
+nothing is sent and the request fails (502) in either failure mode: these failures
+come from the input, and `open` must not let crafted text switch the judge off. Findings keep original positions (whole
 original text) and client texts are never rewritten by the judge. **Coverage is
 bounded:** native secret rules and entropy, email, French phone numbers, IBAN,
 IPv4, payment cards, NIR, SIREN and SIRET. Names, postal addresses, other phone
@@ -673,8 +675,8 @@ not guarantee that no personal data leaves.
 | `SYSTEMONE_QUESTION` | `noul` | `noul`, `choice` (probability of option `injection`) or `score` (probability of the top level) |
 | `SYSTEMONE_THRESHOLD` | `0.7` | Probability in (0, 1]; equality triggers. Starting point from the Noul docs, not calibrated |
 | `SYSTEMONE_ZONE_LOWER` / `SYSTEMONE_ZONE_UPPER` | empty | Required in `cascade`; in [0, 1], lower <= upper, inclusive |
-| `SYSTEMONE_TIMEOUT` | `3s` | Per text; adds to `SEMANTIC_TIMEOUT` in cascade, keep `HTTP_WRITE_TIMEOUT` above both |
-| `SYSTEMONE_FAILURE_MODE` | `closed` | `closed`: 502; `open`: the text passes and `semantic classifier degraded` is logged |
+| `SYSTEMONE_TIMEOUT` | `3s` | Per text; texts are judged one after another and in cascade each also waits for `SEMANTIC_TIMEOUT`. `HTTP_WRITE_TIMEOUT` bounds the whole request and cancels pending calls |
+| `SYSTEMONE_FAILURE_MODE` | `closed` | Provider failures only. `closed`: 502; `open`: the text passes and `semantic classifier degraded` is logged. Masking and size failures, and cancellation, always fail |
 | `SYSTEMONE_MAX_TEXT_RUNES` | `20000` | Larger masked texts fail without being sent |
 
 The key is sent only as `Authorization: Bearer` to the configured host: no

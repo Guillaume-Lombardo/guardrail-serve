@@ -54,7 +54,10 @@ built, and a masking error sends nothing. The app supplies an internal
   `status`, `timeout`, `canceled`, `transport`, `masking_failed`,
   `text_too_large`, `response_too_large`, `invalid_response`,
   `invalid_probability`. `FailClosed` returns them; `FailOpen` returns a degraded
-  assessment (`classifier_degraded=true`) except on cancellation.
+  assessment (`classifier_degraded=true`) for provider failures only.
+  `canceled`, `masking_failed` and `text_too_large` are always errors: the last
+  two are provoked by the input, and fail-open must not let crafted text
+  disable the judge.
 
 ## Cascade
 

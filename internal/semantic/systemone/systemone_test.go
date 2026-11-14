@@ -443,13 +443,11 @@ func TestMaskingFailureNeverSends(t *testing.T) {
 			if api.count() != 0 {
 				t.Fatal("no request may be sent when masking fails")
 			}
-			if mode == httpclassifier.FailClosed {
-				var failure *Error
-				if !errors.As(err, &failure) || failure.Kind != FailureMasking || strings.Contains(err.Error(), "alice") {
-					t.Fatalf("closed: %v", err)
-				}
-			} else if err != nil || assessment.Triggered || assessment.Metadata["classifier_failure"] != "masking_failed" {
-				t.Fatalf("open: %+v %v", assessment, err)
+			// Input-provoked failures are errors in both modes: fail-open must not
+			// let crafted text bypass the judge.
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Kind != FailureMasking || strings.Contains(err.Error(), "alice") || assessment.Triggered {
+				t.Fatalf("%s: %+v %v", mode, assessment, err)
 			}
 			if len(obs.judgments) != 1 || obs.judgments[0].Outcome != FailureMasking {
 				t.Fatalf("observation: %+v", obs.judgments)
@@ -460,11 +458,8 @@ func TestMaskingFailureNeverSends(t *testing.T) {
 			if api.count() != 0 {
 				t.Fatal("no request may be sent for an oversized masked text")
 			}
-			if mode == httpclassifier.FailClosed {
-				var failure *Error
-				if !errors.As(err, &failure) || failure.Kind != FailureTextTooLarge {
-					t.Fatalf("oversize: %v", err)
-				}
+			if !errors.As(err, &failure) || failure.Kind != FailureTextTooLarge {
+				t.Fatalf("oversize: %v", err)
 			}
 		})
 	}

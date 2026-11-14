@@ -67,7 +67,11 @@ func runtimeHandler(cfg config.Config, next http.Handler) http.Handler {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
-		next.ServeHTTP(w, r)
+		// Past the write deadline the response can no longer be delivered, so
+		// detector calls (including paid ones) are cancelled rather than left running.
+		ctx, cancel := context.WithTimeout(r.Context(), cfg.Runtime.WriteTimeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
