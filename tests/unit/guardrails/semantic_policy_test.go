@@ -56,3 +56,20 @@ func TestSemanticPolicyCancellationAndSafeFinding(t *testing.T) {
 		}
 	}
 }
+
+func TestSemanticPolicyRuleAllowlist(t *testing.T) {
+	for value, want := range map[any]string{
+		semantic.RuleSystemOneJudge: "systemone_judge",
+		"attacker-chosen-rule":      "semantic_classification",
+		42:                          "semantic_classification",
+		nil:                         "semantic_classification",
+	} {
+		d, _ := guardrails.NewSemanticPolicyDetector(policyClassifierFunc(func(context.Context, []string) (semantic.PromptInjectionAssessment, error) {
+			return semantic.PromptInjectionAssessment{Triggered: true, Score: 0.8, Metadata: map[string]any{semantic.MetadataRule: value}}, nil
+		}), nil)
+		findings, err := d.Detect(context.Background(), "text")
+		if err != nil || len(findings) != 1 || findings[0].Rule != want {
+			t.Fatalf("%v: %+v %v", value, findings, err)
+		}
+	}
+}

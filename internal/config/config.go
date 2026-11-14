@@ -14,6 +14,7 @@ const DefaultLiteLLMPolicy = "detect_secret"
 
 type Config struct {
 	Semantic             Semantic
+	SystemOne            SystemOne
 	Runtime              Runtime
 	APIPrefix            string
 	APIPort              string
@@ -30,6 +31,7 @@ type Config struct {
 func Load() Config {
 	return Config{
 		Semantic:             loadSemantic(),
+		SystemOne:            loadSystemOne(),
 		Runtime:              loadRuntime(),
 		APIPrefix:            normalizePrefix(getEnv("API_PREFIX", "")),
 		APIPort:              getEnv("API_PORT", "8000"),

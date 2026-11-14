@@ -132,3 +132,38 @@ func TestRuntimeNetworkReadDeadlines(t *testing.T) {
 		})
 	}
 }
+
+// TestRuntimeDeadlineStartsOnArrival sends the body slowly to a real server
+// configured like NewServer: the request deadline must already have passed at
+// dispatch, so no detector call can start after the write deadline.
+func TestRuntimeDeadlineStartsOnArrival(t *testing.T) {
+	cfg := config.Config{Runtime: config.Runtime{MaxBodyBytes: 64, WriteTimeout: 200 * time.Millisecond, ReadTimeout: 5 * time.Second}}
+	dispatched := make(chan error, 1)
+	srv := httptest.NewUnstartedServer(runtimeHandler(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dispatched <- r.Context().Err()
+		w.WriteHeader(204)
+	})))
+	srv.Config.ReadTimeout, srv.Config.WriteTimeout = cfg.Runtime.ReadTimeout, cfg.Runtime.WriteTimeout
+	srv.Start()
+	defer srv.Close()
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, "POST /scan HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\nab"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(400 * time.Millisecond) // body completes after the write deadline
+	if _, err := io.WriteString(conn, "cd"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-dispatched:
+		if err != context.DeadlineExceeded {
+			t.Fatalf("dispatched with live context after the write deadline: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler not dispatched")
+	}
+}

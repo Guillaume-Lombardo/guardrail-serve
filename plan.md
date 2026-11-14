@@ -569,3 +569,45 @@ the orchestrator.
   identical to the deterministic detector (13/1/69/0); DeBERTa reproduces the L10
   counts. FPR 16.1% > 5%, so the examples stay in `annotate`. See ADR 0020 and
   `deploy/semantic-sidecar/EVALUATION.md`.
+
+## L12a — System One (Jev) gray-zone judge (validated)
+
+- Status: in progress (14/11/2026). Branch `feat/systemone-judge`, base `main` at `919b349`.
+  Budget: at most three PRs in total, deadline 17/11/2026 23:00 Paris time. The L12
+  evaluation bench runs in parallel (corpus `tests/eval/corpus/semantic-bench/**`,
+  `tests/eval/semanticbenchfixtures/**`, `tests/eval/README.md`, ADR 0022) and is
+  not touched here; it runs after this lot merges.
+- Objective: an optional client for TypeSafe's System One API behind the existing
+  `semantic.PromptInjectionDetector` interface, used only inside a configurable
+  gray zone of the Prompt Guard 2 score, with mandatory masking before any call.
+- In scope: `internal/semantic/systemone/**`; adaptations in `internal/semantic`,
+  `internal/config`, `internal/app`, `internal/guardrails` (semantic adapter rule),
+  `internal/observability` (bounded judge metrics); dedicated unit, integration and
+  end-to-end tests (not corpus); root `README.md`, `.env.template`, ADR 0021, this plan.
+- Out of scope: local model deployments and images, `EVALUATION.md`, baselines,
+  corpus or threshold tuning, retries, credit purchase or credential creation.
+- Constraints:
+  - Typed noul/choice/score questions only; fixed instructions; scanned text only in
+    `state` as data. Strict answer validation (domain, cardinality, NaN, labels).
+  - Base URL and model configurable, no default host or key; HTTPS except loopback;
+    no redirects or environment proxies; key from file or environment, redacted.
+  - Masking with detect_secret + detect_pii (typed masks) in an internal,
+    non-recursive policy before any HTTP request; masking failure means no request
+    in both failure modes.
+  - Cascade: zone `[lower, upper]` closed, validated, required; outside the zone no
+    call; a primary failure is never a score of 0. `judge_only` mode for the bench.
+  - Bounded Prometheus metrics on the handler registry; no text, header, key or URL
+    in logs, errors or metrics. Disabled by default.
+  - Real API: documented GET `/v1/models` only, plus at most one synthetic smoke
+    POST after a cost estimate, behind a build tag; tests use `httptest`.
+- Acceptance criteria:
+  1. `httptest` proofs that secrets, payment cards, IBAN, email, French phone and
+     NIR in Unicode text never appear in outgoing bodies, headers or URLs, with
+     typed masks, and that findings keep original positions.
+  2. Cascade routing: below/above zone make no call, inside makes one, primary
+     failure makes none; judge-only judges every non-blank text.
+  3. Failure modes, cancellation, timeouts, oversize and malformed answers are
+     typed failures; fail-open never sends unmasked text.
+  4. Startup validation rejects invalid zone, URL, key, mode combinations.
+  5. Metrics are bounded and value-free; registry isolation and auth unchanged.
+- ADR: `docs/adr/0021-systemone-gray-zone-judge.md`.

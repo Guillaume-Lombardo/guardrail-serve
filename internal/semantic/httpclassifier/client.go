@@ -94,9 +94,9 @@ func (c *Classifier) fail(failure *Error) (semantic.PromptInjectionAssessment, e
 		Reason:    reasonDegraded,
 		Model:     c.cfg.modelName,
 		Metadata: map[string]any{
-			"classifier_format":   string(c.cfg.format),
-			"classifier_degraded": true,
-			"classifier_failure":  string(failure.Kind),
+			"classifier_format":       string(c.cfg.format),
+			semantic.MetadataDegraded: true,
+			"classifier_failure":      string(failure.Kind),
 		},
 	}, nil
 }
