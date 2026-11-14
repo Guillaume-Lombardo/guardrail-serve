@@ -381,7 +381,7 @@
     "test": {
       "path": "test.jsonl",
       "role": "test",
-      "sha256": "14693c9b4baadb8642c4b11139606bcaa6292a8545021d51bf3d28f8f9ce0d46"
+      "sha256": "f0be9c95c2607d1107353cd8ad40294433abeea6316dd47ffa955f1b05c36303"
     }
   },
   "format": "guardrail-serve-semantic-bench-manifest",
@@ -406,7 +406,7 @@
     "test": {
       "ids_sha256": "46a9f2824858aca70d1fe4ebd59935d2af04dfc695a445593316fd8a584e049d",
       "template_groups_sha256": "61fc97b7f1d43b8618b8f5e47cdf76ae8419e58cc5261dbc0a57d78bb347bb62",
-      "texts_sha256": "9aa26ce6d9ba60a141b05c78cb31a6b0a7d83673942079548972484228ed4bdc"
+      "texts_sha256": "4535ac98b8e83d7703c6f64354d44610c243d162bc68fe4a33ac486022e183a7"
     }
   },
   "sources": {

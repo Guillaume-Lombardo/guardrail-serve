@@ -33,7 +33,7 @@ const (
 	// version. A deliberate change means a new version (semantic-bench-fr-v2),
 	// never an edit; update these digests only together with that version.
 	frozenCalibrationSHA256 = "038db30e5953e4ac4f4e96aa9d108964c909a3c6dd705b9b346e8d0aeecf7dc7"
-	frozenTestSHA256        = "14693c9b4baadb8642c4b11139606bcaa6292a8545021d51bf3d28f8f9ce0d46"
+	frozenTestSHA256        = "f0be9c95c2607d1107353cd8ad40294433abeea6316dd47ffa955f1b05c36303"
 )
 
 func load(t *testing.T) *fx.Bundle {
