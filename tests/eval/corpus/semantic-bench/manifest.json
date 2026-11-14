@@ -371,7 +371,7 @@
     "calibration": {
       "path": "calibration.jsonl",
       "role": "calibration",
-      "sha256": "4421934d205b949d2eabe22e64b244beec72c6944e6415489d9c87b288152f13"
+      "sha256": "163c804e0ff251024758ce3324886e35527cdf280e191b58d69c9f228f166c75"
     },
     "metadata": {
       "path": "metadata.jsonl",
@@ -381,7 +381,7 @@
     "test": {
       "path": "test.jsonl",
       "role": "test",
-      "sha256": "1bea6b8f55a7d3d387515ef797524b9decd8e2c8c328c26bea8d11bc07ddbf9e"
+      "sha256": "b5e64d8abfda99f1dbf67ad1d5d8ebb612952bf9c936240a068996ba4253d330"
     }
   },
   "format": "guardrail-serve-semantic-bench-manifest",
@@ -401,12 +401,12 @@
     "calibration": {
       "ids_sha256": "c43c14dd2baf9abf9fcbd880b6a786195d3e23bc4cb46fe9d7d9d8fc38281c02",
       "template_groups_sha256": "deb8ef70b4b47866eb65f9c56605a9d0f3218972ebc9cdb9bc440530da7092fd",
-      "texts_sha256": "a3e81b0a55ddf3b48260c0ce121a9bbd2ff64f27a1e8d571e1e840f9b487871c"
+      "texts_sha256": "024eb90fafd4bcacc42f818533ee26feb9e0dcda3b826946cf65db787a3c1965"
     },
     "test": {
       "ids_sha256": "46a9f2824858aca70d1fe4ebd59935d2af04dfc695a445593316fd8a584e049d",
       "template_groups_sha256": "61fc97b7f1d43b8618b8f5e47cdf76ae8419e58cc5261dbc0a57d78bb347bb62",
-      "texts_sha256": "6caa9b5f53a531ff3d543ec1c3a0b227c2de235ac3d58e9d3a3cc845713bb8a9"
+      "texts_sha256": "89641732e8ad357e39fe5a5ac701a29c2b99ceb11a02db1fa202b43315e9a4ac"
     }
   },
   "sources": {
