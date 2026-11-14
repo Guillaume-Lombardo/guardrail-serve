@@ -674,8 +674,17 @@ the orchestrator.
     unbilled `GET /v1/models`. The cascade reuses the cache: 0 new calls.
   - Size: masked body at most about 1.1 KB (589 bytes of fixed instructions, texts at
     most 303 bytes as JSON, wrapper), mean about 0.9 KB.
-  - Expected: about 300 input tokens per call, about 48,000 tokens, about USD 0.002.
-  - Bound enforced before each call: input tokens <= body bytes, so 160 x 1.1 KB =
-    176,000 tokens = USD 0.0074. Proxy hard caps: 200 upstream calls and USD 1
-    cumulative (absolute worst case 200 x 64k tokens = USD 0.54); stop on 401 or two
-    consecutive 402/429. All far below the USD 5 L12 cap.
+  - Expected (first estimate): about 300 input tokens per call, about 48,000 tokens,
+    about USD 0.002.
+  - Bound enforced before each call: the documented 64k-token request maximum (USD
+    0.0027 per call). Proxy hard caps: 200 upstream calls and USD 1 cumulative
+    (absolute worst case 200 x 64k tokens = USD 0.54); stop on 401 or two consecutive
+    402/429. All far below the USD 5 L12 cap.
+  - Model check (14/11/2026 16:55-16:56 Paris): `GET /v1/models` lists only the aliases
+    `jev-latest` and `jev-preview`, not the versioned names. One budgeted probe on a fixed
+    non-corpus text (`guardrail-bench jev-probe`) asked `jev-1.14.0` and was served
+    `jev-1.14.0`: 339 input tokens for a 375-byte body, USD 0.000014. Billed tokens
+    include a server-side overhead, so body bytes are no upper bound (the first draft of
+    the pre-call check assumed they were; corrected to the 64k maximum before any bench
+    call). Revised expectation: about 500-700 tokens per bench call, about 100,000
+    tokens, about USD 0.004.

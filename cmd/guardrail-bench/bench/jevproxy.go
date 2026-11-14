@@ -39,12 +39,13 @@ func CostUSD(inputTokens int64) float64 {
 	return float64(inputTokens) * JevUSDPerMillionInputTokens / 1e6
 }
 
-// WorstCaseUSD bounds a call before it is sent: the input token count of a
-// request can never exceed its UTF-8 byte count with a byte-level tokenizer,
-// and the documented per-request limit is 64k tokens.
-func WorstCaseUSD(bodyBytes int) float64 {
-	return CostUSD(int64(min(bodyBytes, 64_000)))
-}
+// MaxTokensPerRequest is the documented System One per-request input limit.
+const MaxTokensPerRequest = 64_000
+
+// WorstCaseUSD bounds one call before it is sent. Billed input tokens include
+// a server-side overhead (a 375-byte probe was billed 339 tokens), so the body
+// size is no bound: the documented per-request maximum is used instead.
+func WorstCaseUSD() float64 { return CostUSD(MaxTokensPerRequest) }
 
 // JevEntry is one cached System One answer, reduced to the fields the judge
 // decodes. It never holds the request text or headers.
@@ -292,7 +293,7 @@ func (p *JevProxy) call(ctx context.Context, key string, body []byte) (JevEntry,
 		p.stats.Refused++
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: call cap")
-	case p.stats.CostUSD+WorstCaseUSD(len(body)) > p.budget.MaxUSD:
+	case p.stats.CostUSD+WorstCaseUSD() > p.budget.MaxUSD:
 		p.stats.StopReason = fmt.Sprintf("worst-case cost would exceed USD %.2f", p.budget.MaxUSD)
 		p.stats.Refused++
 		p.mu.Unlock()

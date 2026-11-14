@@ -34,7 +34,8 @@ commands:
   calibrate   freeze the protocol from calibration runs
   export      bundle text-free run files for the report
   report      compute results JSON and Markdown tables from a bundle
-  jev-models  list System One models (read-only GET /v1/models)`
+  jev-models  list System One models (read-only GET /v1/models)
+  jev-probe   one budgeted judge call on a fixed text to check a model name`
 
 func run(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
@@ -51,6 +52,8 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 		return reportCommand(args[1:], stdout)
 	case "jev-models":
 		return modelsCommand(ctx, args[1:], stdout)
+	case "jev-probe":
+		return probeCommand(ctx, args[1:], stdout)
 	}
 	return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 }
@@ -338,7 +341,38 @@ func modelsCommand(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	for _, model := range models {
-		fmt.Fprintf(stdout, "%s\t%s\n", model.Name, model.ReleaseDate)
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", model.Name, model.ReleaseDate, model.Description)
 	}
+	return nil
+}
+
+// probeCommand checks that a model name is served, with one capped, ledgered call.
+func probeCommand(ctx context.Context, args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("jev-probe", flag.ContinueOnError)
+	keyFile := flags.String("jev-key-file", "", "file holding the System One key (for example /dev/fd/3)")
+	model := flags.String("model", bench.JevFixed.Model, "model name to probe")
+	cacheDir := flags.String("cache-dir", defaultCacheDir(), "private cache outside Git")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	key, err := readKey(*keyFile)
+	if err != nil {
+		return err
+	}
+	cache, err := bench.NewCache(filepath.Join(*cacheDir, "jev-probe"))
+	if err != nil {
+		return err
+	}
+	ledger, err := bench.OpenLedger(filepath.Join(*cacheDir, "jev-ledger.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer ledger.Close()
+	result, err := bench.ProbeJev(ctx, bench.JevProxyConfig{Key: key, Cache: cache, Ledger: ledger}, *model)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "requested %s: status %d, served model %q, %d input tokens, USD %.8f\n",
+		*model, result.Status, result.ServedModel, result.InputTokens, result.CostUSD)
 	return nil
 }

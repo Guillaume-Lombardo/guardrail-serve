@@ -64,6 +64,5 @@ func TestExactMcNemar(t *testing.T) {
 
 func TestCostIsTheInputTokenPrice(t *testing.T) {
 	near(t, "1M tokens", CostUSD(1_000_000), 0.042)
-	near(t, "worst case is capped at 64k tokens", WorstCaseUSD(10<<20), 64_000*0.042/1e6)
-	near(t, "worst case of a small body", WorstCaseUSD(2000), 2000*0.042/1e6)
+	near(t, "worst case is the documented 64k-token request", WorstCaseUSD(), 64_000*0.042/1e6)
 }

@@ -166,8 +166,8 @@ func TestJevProxyBudgetStops(t *testing.T) {
 		t.Fatalf("stop reason %q", stats.StopReason)
 	}
 
-	// The worst case (body bytes as tokens) is checked before sending.
-	tiny := newTestJevProxy(t, upstream, true, Budget{MaxCalls: 10, MaxUSD: 1e-9, StopAfter: 2}, nil)
+	// The worst case (a 64k-token request) is checked before sending.
+	tiny := newTestJevProxy(t, upstream, true, Budget{MaxCalls: 10, MaxUSD: WorstCaseUSD() / 2, StopAfter: 2}, nil)
 	if response := post(t, tiny, "/v1/systemone", judgeBody(t, "x")); response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("budget: status %d", response.Code)
 	}
