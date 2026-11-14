@@ -576,6 +576,13 @@ func TestJevProxyAdmitsNothingOnceAReservationFails(t *testing.T) {
 	first := make(chan int, 1)
 	go func() { first <- post(t, proxy, "/v1/systemone", judgeBody(t, "first")).Code }()
 	<-writer.entered
+	// The reservation is written while the admission lock is held: no other
+	// request can be admitted until it is durable or has failed.
+	if proxy.mu.TryLock() {
+		proxy.mu.Unlock()
+		close(writer.release)
+		t.Fatal("the admission lock is released while the reservation is written")
+	}
 	second := make(chan int, 1)
 	go func() { second <- post(t, proxy, "/v1/systemone", judgeBody(t, "second")).Code }()
 	close(writer.release) // the first reservation fails while the second waits for admission
