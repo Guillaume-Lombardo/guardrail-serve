@@ -81,3 +81,21 @@ e-mail addresses and card number (and pinning the documented limits: names, post
 addresses and free-form passwords in prose do leave), and dedicated synthetic
 credentials (provider keys, tokens, password assignment, IBAN, phone, card) that must be
 masked or refused.
+
+## Known limitations
+
+This is measurement tooling only. Nothing here runs in production or changes the
+service.
+
+- The judge caps are cumulative per ledger, and each cache directory has its own
+  ledger. Pointing `-cache-dir` at a new directory starts a new ledger with fresh caps
+  and no cached answers. The overall spend ceiling is therefore the operator's choice
+  of ledger, not a global account limit.
+- Ledger locking uses `flock` and works on Unix only. Elsewhere, live judge mode
+  refuses to start.
+- The runs committed under `deploy/semantic-sidecar/bench/results/` predate the
+  `protocol_commit` field. The driver (`run-bench.sh`) checked their protocol against
+  the committed blob, and the report lists them as "not recorded".
+- The egress guard is a second line of defense with its own gaps (names, postal
+  addresses, free-form secrets). It does not replace the service masking, whose limits
+  are documented in `docs/detectors.md`.
