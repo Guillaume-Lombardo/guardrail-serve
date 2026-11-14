@@ -251,7 +251,7 @@ that fail the `payment_card` validator are not masked (the guard refused them).
 ### Reproduce
 
 Text-free run bundle, results, tables and chart:
-[`bench/results/`](bench/results/) (`runs.json`, `results.json`, `results.md`,
+[`bench/results/`](bench/results/) (`runs.json.gz`, `results.json`, `results.md`,
 `bench-test.png`). Rebuild them without a model, a key or the network (beyond uv's
 one-time download of matplotlib) with
 [`bench/reproduce-report.sh`](bench/reproduce-report.sh). The measurement itself:

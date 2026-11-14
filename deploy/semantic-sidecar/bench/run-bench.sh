@@ -143,7 +143,7 @@ case $phase in
       -cache-dir "$CACHE" -run-id bench-test-cascade-warm -out "$OUT/bench-test-cascade-warm.json" ;;
   report)
     require_frozen
-    "$BIN" export -protocol "$RESULTS/protocol.json" -out "$RESULTS/runs.json" "$OUT"/*.json
+    "$BIN" export -protocol "$RESULTS/protocol.json" -out "$RESULTS/runs.json.gz" "$OUT"/*.json
     "$BENCH/reproduce-report.sh" ;;
   *)
     sed -n '2,15p' "$0" >&2

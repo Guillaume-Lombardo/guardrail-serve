@@ -2,6 +2,7 @@ package bench
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 )
 
@@ -65,4 +66,25 @@ func TestExactMcNemar(t *testing.T) {
 func TestCostIsTheInputTokenPrice(t *testing.T) {
 	near(t, "1M tokens", CostUSD(1_000_000), 0.042)
 	near(t, "worst case is the documented 64k-token request", WorstCaseUSD(), 64_000*0.042/1e6)
+}
+
+func TestCompressedJSONRoundTripsDeterministically(t *testing.T) {
+	dir := t.TempDir()
+	bundle := Bundle{Format: BundleFormat, Version: FormatVersion, ProtocolSHA256: "p", Runs: []RunFile{{RunID: "a", Cases: []CaseResult{{ID: "x"}}}}}
+	first, second := filepath.Join(dir, "a.json.gz"), filepath.Join(dir, "b.json.gz")
+	if err := WriteJSON(first, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteJSON(second, bundle); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := FileSHA256(first)
+	b, _ := FileSHA256(second)
+	if a != b {
+		t.Fatal("the same value must give the same compressed bytes")
+	}
+	var back Bundle
+	if err := ReadJSON(first, &back); err != nil || back.Runs[0].Cases[0].ID != "x" {
+		t.Fatalf("round trip: %v %+v", err, back)
+	}
 }

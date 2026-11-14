@@ -2,6 +2,7 @@ package bench
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Mode is the service configuration of one run.
@@ -170,7 +172,9 @@ type Bundle struct {
 	Runs           []RunFile `json:"runs"`
 }
 
-// WriteJSON writes v as indented JSON through a temporary file and rename.
+// WriteJSON writes v as indented JSON through a temporary file and rename. A
+// path ending in .gz is gzip-compressed (no name, no timestamp: the same value
+// gives the same bytes).
 func WriteJSON(path string, v any) error {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
@@ -178,6 +182,20 @@ func WriteJSON(path string, v any) error {
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(v); err != nil {
 		return err
+	}
+	if strings.HasSuffix(path, ".gz") {
+		var compressed bytes.Buffer
+		writer, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+		if err != nil {
+			return err
+		}
+		if _, err := writer.Write(buffer.Bytes()); err != nil {
+			return err
+		}
+		if err := writer.Close(); err != nil {
+			return err
+		}
+		buffer = compressed
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -198,11 +216,22 @@ func WriteJSON(path string, v any) error {
 	return os.Rename(temporary.Name(), path)
 }
 
-// ReadJSON decodes exactly one JSON value from path, rejecting unknown fields.
+// ReadJSON decodes exactly one JSON value from path (gzip-compressed when the
+// path ends in .gz), rejecting unknown fields.
 func ReadJSON(path string, v any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
+	}
+	if strings.HasSuffix(path, ".gz") {
+		reader, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		data, err = io.ReadAll(io.LimitReader(reader, 256<<20))
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

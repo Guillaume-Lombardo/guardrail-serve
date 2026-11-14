@@ -13,8 +13,8 @@ and [`docs/evaluation.md`](../../docs/evaluation.md).
 ```text
 guardrail-bench run        -corpus C -mode rules|union|judge|cascade [-model M] ...
 guardrail-bench calibrate  -rules R -out protocol.json <one classifier run per model>
-guardrail-bench export     -protocol P -out runs.json <run files>
-guardrail-bench report     -bundle runs.json -protocol P -out results.json [-markdown results.md] [-root .]
+guardrail-bench export     -protocol P -out runs.json.gz <run files>   (.gz: gzip, read back transparently)
+guardrail-bench report     -bundle runs.json.gz -protocol P -out results.json [-markdown results.md] [-root .]
 guardrail-bench jev-models -jev-key-file /dev/fd/3
 guardrail-bench jev-probe  -jev-key-file /dev/fd/3 [-model jev-1.14.0]
 ```
