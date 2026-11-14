@@ -1,0 +1,101 @@
+# guardrail-bench
+
+Semantic model bench ([ADR 0023](../../docs/adr/0023-semantic-model-bench.md)). It runs
+the real guardrail-serve handler in-process on loopback, sends every case of one corpus
+once (concurrency 1), records classifier scores and System One answers through caching
+proxies, freezes thresholds and the gray zone from the calibration split, and reports
+per-configuration metrics from text-free run files. Results and their interpretation:
+[`deploy/semantic-sidecar/EVALUATION.md`](../../deploy/semantic-sidecar/EVALUATION.md)
+and [`docs/evaluation.md`](../../docs/evaluation.md).
+
+## Commands
+
+```text
+guardrail-bench run        -corpus C -mode rules|union|judge|cascade [-model M] ...
+guardrail-bench calibrate  -rules R -out protocol.json <one classifier run per model>
+guardrail-bench export     -protocol P -out runs.json.gz <run files>   (.gz: gzip, read back transparently)
+guardrail-bench report     -bundle runs.json.gz -protocol P -out results.json [-markdown results.md] [-root .]
+guardrail-bench jev-models -jev-key-file /dev/fd/3
+guardrail-bench jev-probe  -jev-key-file /dev/fd/3 [-model jev-1.14.0]
+```
+
+- Corpora: `bench-calibration`, `bench-test` (ADR 0022, hashes checked against the
+  manifest), `french-injection-v1`, `original-v1` (historical, reported apart).
+- Models (pinned revision and weights sha256 in `bench/models.go`): `pg2-86m`,
+  `pg2-22m`, `deberta-v2`, `sentinel`, `qwen3guard-0.6b`.
+- `union` with `-sidecar-url` records live scores; without it, it replays the cache
+  (`-replay-delay` sleeps the recorded upstream latency). Test runs take their
+  threshold from the protocol (`-threshold frozen`, or `current` = 0.9 for `pg2-86m`).
+- `judge` runs on `bench-test` only. `-jev-live` allows paid calls, capped by
+  `-max-calls` (200) and `-max-usd` (1). The caps are cumulative over the ledger: a new
+  run, or a new process, starts from what `jev-ledger.jsonl` already records, the
+  ledger is locked while a proxy uses it, and a line it cannot read refuses it. The key is read from `-jev-key-file`, for
+  example `/dev/fd/3`, never from an argument or the environment. Without `-jev-live`
+  the proxy is cache-only. The settings must equal the protocol's frozen judge question
+  (`jev-1.14.0`, `noul`, threshold 0.7, timeout 10s, fail closed).
+- Before each paid call the proxy reserves the worst case (64,000 input tokens, the
+  documented request maximum). An attempt whose billing is unknown (transport failure,
+  5xx, unreadable answer, invalid usage) keeps that worst case as spent. It stops on a
+  401, after two consecutive 402/429, at the call or dollar cap, and when the API serves
+  another model version than the one requested. Every attempt appends two text-free
+  lines to `jev-ledger.jsonl` in the cache directory: the worst-case reservation,
+  synced to disk before the request leaves (no durable reservation, no call), then its
+  settlement. A reservation never settled (a crash, a failed write) stays counted as the
+  worst case. The attempt also charges its case (billed tokens,
+  or the worst case when the billing is unknown, published apart). Answers are reduced
+  to the asked question's `noul` probability before they are cached or forwarded, and
+  a cached answer is reduced again when read (an entry that does not fit is an error).
+- `jev-models` (read-only, unbilled) lists the served names, which are aliases
+  (`jev-latest`, `jev-preview`); `jev-probe` sends one call on a fixed benign text,
+  under the same ledger and cumulative caps, to check that a versioned name is served.
+- `cascade` replays both caches: no inference and no paid call.
+- `run` needs `-protocol` on every corpus but the calibration split. `run`, `export`
+  and `report` refuse a protocol file
+  that is not committed in Git or differs from its committed version; `run` records the
+  commit in the run file.
+- `report` loads the canonical corpora from `-root` and refuses a run that does not
+  hold every case of its corpus exactly once, with the corpus labels, languages and
+  file hash, or whose threshold, zone or judge settings are not the frozen ones. It also
+  refuses a judged case without exactly one recorded probability or whose decision is
+  not probability >= the frozen threshold, and repeated runs of one configuration that
+  do not answer the same cases the same way.
+
+Errors (non-200 answers of the service, including fail-closed judge or classifier
+failures and egress-guard refusals) are counted apart and never as detections.
+
+## Driver
+
+[`deploy/semantic-sidecar/bench/run-bench.sh`](../../deploy/semantic-sidecar/bench/run-bench.sh)
+runs the phases in order (`build`, `calibration`, `freeze`, `test`, `judge`,
+`cascade`, `report`) with one sidecar container at a time (2 CPUs, 4 GB, loopback port,
+read-only). `reproduce-report.sh` rebuilds results, tables and the chart from the
+committed bundle without a model or a key.
+
+## Tests
+
+`go test ./cmd/guardrail-bench/...` is offline: metrics, R1/R2 calibration, protocol
+enforcement, proxy cache and replay, budget stops, egress guard, the report and its
+consistency checks, and two wire tests through the real masking into a fake System One:
+the whole `bench-test` split, checked against a hand-written inventory of its synthetic
+e-mail addresses and card number (and pinning the documented limits: names, postal
+addresses and free-form passwords in prose do leave), and dedicated synthetic
+credentials (provider keys, tokens, password assignment, IBAN, phone, card) that must be
+masked or refused.
+
+## Known limitations
+
+This is measurement tooling only. Nothing here runs in production or changes the
+service.
+
+- The judge caps are cumulative per ledger, and each cache directory has its own
+  ledger. Pointing `-cache-dir` at a new directory starts a new ledger with fresh caps
+  and no cached answers. The overall spend ceiling is therefore the operator's choice
+  of ledger, not a global account limit.
+- Ledger locking uses `flock` and works on Unix only. Elsewhere, live judge mode
+  refuses to start.
+- The runs committed under `deploy/semantic-sidecar/bench/results/` predate the
+  `protocol_commit` field. The driver (`run-bench.sh`) checked their protocol against
+  the committed blob, and the report lists them as "not recorded".
+- The egress guard is a second line of defense with its own gaps (names, postal
+  addresses, free-form secrets). It does not replace the service masking, whose limits
+  are documented in `docs/detectors.md`.

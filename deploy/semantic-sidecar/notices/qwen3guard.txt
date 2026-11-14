@@ -1,0 +1,5 @@
+This image contains the model Qwen/Qwen3Guard-Gen-0.6B
+(https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B, revision
+fada3b2f655b89601929198343c94cd2f64d93cc), Copyright 2024 Alibaba Cloud, licensed under
+the Apache License 2.0; the license text travels with the weights in
+/models/model/LICENSE. It contains no Llama Materials.

@@ -63,6 +63,15 @@ and a canary check refuses a model whose mapping is inverted (see "Label mapping
 | [`meta-llama/Llama-Prompt-Guard-2-22M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M) (`profiles/prompt-guard-2-22m.env`) | Llama 4 Community License | yes | `LABEL_1` | `11614a155199` | `5120e30bcd53` | DeBERTa-v3-xsmall, English pretraining: Meta documents a larger gap on multilingual text. 283 MB of weights. |
 | [`protectai/deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2) (`profiles/deberta-fallback.env`) | Apache-2.0 | no | `INJECTION` (`SAFE` = benign) | `90c9989b1a34` | `6521cb8d0ac0` | Previous default and fallback: English only; no jailbreak detection; avoid on system prompts; upstream archived. |
 
+Two more models are bench candidates only, with build arguments in [`bench/`](bench)
+and no supported profile ([ADR 0023](../../docs/adr/0023-semantic-model-bench.md),
+[EVALUATION.md](EVALUATION.md)):
+
+| Model | License | Gated | Attack label | Revision | `model.safetensors` sha256 | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| [`qualifire/prompt-injection-sentinel`](https://huggingface.co/qualifire/prompt-injection-sentinel) (`bench/sentinel.env`) | Elastic License 2.0 | yes | `jailbreak` (`benign`) | `e24131782819` | `fcba2fec67d9` | ModernBERT-large, English training data, not evaluated on other languages by its authors. ELv2 allows commercial use but forbids offering it to third parties as a hosted or managed service ([`notices/qualifire-sentinel.txt`](notices/qualifire-sentinel.txt)). The stock image loads it only with `USER` set in the container (torch inductor). |
+| [`Qwen/Qwen3Guard-Gen-0.6B`](https://huggingface.co/Qwen/Qwen3Guard-Gen-0.6B) (`bench/qwen3guard-gen-0.6b.env`) | Apache-2.0 | no | category `Jailbreak` | `fada3b2f655b` | `4f3ce47ebd96` | Generative safety model (Qwen3, 0.6B): the stock backend cannot serve it; `bench/qwen3guard.py` runs it on the unchanged server with prompt moderation, greedy decoding and a strict parse, score 1.0 iff `Jailbreak` is listed. |
+
 Thresholds belong to the Go service (`SEMANTIC_THRESHOLD`, default `0.9`); the
 sidecar returns probabilities. Calibrate the threshold per model on your own
 data. Vendor metrics are not a calibration.

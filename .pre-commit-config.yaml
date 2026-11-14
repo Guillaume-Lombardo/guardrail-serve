@@ -15,7 +15,8 @@ repos:
       - id: no-commit-to-branch
         args: [--branch, main, --branch, master, --branch, staging-stable]
       - id: pretty-format-json
-        exclude: "^.*ipynb$"
+        # Bench results are generated and hash-pinned (protocol sha256): never reformat them.
+        exclude: "^(.*ipynb|deploy/semantic-sidecar/bench/results/.*)$"
         args:
           - --autofix
       - id: trailing-whitespace

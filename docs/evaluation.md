@@ -1,6 +1,7 @@
 # Evaluation
 
-Offline regression gate, versioned corpora and measured results.
+Offline regression gate, versioned corpora, the semantic model bench and measured
+results.
 
 ## Offline regression gate
 
@@ -77,3 +78,30 @@ edit corpus labels to get a pass. See [ADR 0015](adr/0015-offline-regression-gat
 and the [evaluation CLI documentation](../cmd/guardrail-eval/README.md). Baseline refresh,
 floors and the corpus are described in [`tests/eval/README.md`](../tests/eval/README.md) and
 [ADR 0018](adr/0018-french-injection-recall.md).
+
+## Semantic model bench (held-out French split)
+
+`cmd/guardrail-bench` ([ADR 0023](adr/0023-semantic-model-bench.md),
+[usage](../cmd/guardrail-bench/README.md)) compares semantic options through the real
+service on the French benchmark of [ADR 0022](adr/0022-semantic-bench-corpus.md):
+thresholds and the cascade gray zone are tuned on the calibration split only, frozen
+in a committed protocol, then each candidate runs once on the 160-case test split.
+It is a manual measurement (models in containers, a paid judge), not a CI gate; its
+offline tests run with `go test ./cmd/guardrail-bench/...`.
+
+Test split (80 attacks, 80 benign texts), chains as blocking policies:
+
+| Configuration | Recall (95% CI) | FPR (95% CI) | p50 |
+|---|---|---|---:|
+| rules | 13/80 = 16.2% [9.7, 25.8] | 1/80 = 1.2% [0.2, 6.7] | 1 ms |
+| rules + Prompt Guard 2 86M at 0.9 (reference) | 20/80 = 25.0% [16.8, 35.5] | 2/80 = 2.5% [0.7, 8.7] | 205 ms |
+| rules + Qwen3Guard-Gen-0.6B | 31/80 = 38.8% [28.8, 49.7] | 2/80 = 2.5% [0.7, 8.7] | 2.9 s |
+| rules + cascade (86M, judge in the gray zone) | 33/80 = 41.2% [31.1, 52.2] | 3/80 = 3.8% [1.3, 10.5] | 208 ms |
+| rules + System One judge | 72/80 = 90.0% [81.5, 94.8] | 3/79 = 3.8% [1.3, 10.6], 1 error | 133 ms |
+
+Recalibrated 86M, 22M, ProtectAI DeBERTa v2 and Qualifire Sentinel add nothing over
+the reference at a calibrated threshold. The judge cost USD 0.019 per 1000 requests
+(real paid traffic of the whole bench: 160 calls, USD 0.0031). The historical corpora
+are measured again as diagnostics only. Full tables, latency, cost, licenses, limits
+and the recommendation:
+[`deploy/semantic-sidecar/EVALUATION.md`](../deploy/semantic-sidecar/EVALUATION.md).

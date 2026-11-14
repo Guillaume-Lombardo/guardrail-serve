@@ -96,14 +96,19 @@ for the model, on the build host with 2 shared vCPUs. Details and protocol:
 | Prompt injection, original corpus | 100% | 0 to 3% |
 | Prompt injection, French corpus (62 cases), rules only | 93.5% | 3.2% |
 | Same, rules + Prompt Guard 2 86M | 96.8% | 16.1% |
+| Prompt injection, French held-out split (160 cases), rules + Prompt Guard 2 86M | 25.0% | 2.5% |
+| Same split, rules + System One judge (masked text sent to a paid API) | 90.0% | 3.8% |
 
 | Latency per request | p50 |
 | --- | ---: |
 | Deterministic detectors | ~0.3 ms |
-| Prompt Guard 2 86M sidecar (CPU) | +165 to 170 ms |
+| Prompt Guard 2 86M sidecar (CPU) | +165 to 205 ms |
+| System One judge (remote) | ~133 ms |
 
-The model adds little recall on French text for many more false positives, so the
-example policies keep it in `annotate` (report only) while the rules block.
+The 86M model adds little recall on French text, so the example policies keep it in
+`annotate` (report only) while the rules block. Where sending masked text to System
+One is acceptable, the judge in `judge_only` mode is the measured option for French
+injection that can block.
 
 ## Documentation
 
