@@ -3,6 +3,8 @@ package bench
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +57,7 @@ func OpenLedger(path string) (*Ledger, error) {
 func readLedger(r io.Reader) (LedgerTotals, error) {
 	var totals LedgerTotals
 	open := map[string]float64{}
+	seen := map[string]bool{}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 4096), 1<<20)
 	for n := 1; scanner.Scan(); n++ {
@@ -68,9 +71,10 @@ func readLedger(r io.Reader) (LedgerTotals, error) {
 		}
 		switch {
 		case line.Billing == BillingReserved:
-			if _, dup := open[line.Attempt]; dup || line.Attempt == "" {
+			if seen[line.Attempt] || line.Attempt == "" {
 				return LedgerTotals{}, fmt.Errorf("line %d repeats or lacks a reservation id", n)
 			}
+			seen[line.Attempt] = true
 			open[line.Attempt] = line.CostUSD
 			totals.Calls++
 		case line.Attempt != "":
@@ -92,6 +96,16 @@ func readLedger(r io.Reader) (LedgerTotals, error) {
 		totals.SpentUSD += worst // never settled: a crash after the call, or a failed write
 	}
 	return totals, nil
+}
+
+// newAttemptID is a random reservation id: unique across runs and crashes
+// without depending on how many earlier lines reached the disk.
+func newAttemptID() (string, error) {
+	var id [12]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
 }
 
 // Prior is what the ledger held when it was opened.

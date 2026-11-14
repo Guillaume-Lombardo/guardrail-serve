@@ -522,6 +522,7 @@ func TestJevLedgerKeepsUnsettledReservationsAsSpent(t *testing.T) {
 	for name, lines := range map[string]string{
 		"orphan settlement":    settled + "\n",
 		"repeated reservation": reserved + "\n" + reserved + "\n",
+		"reused id":            reserved + "\n" + settled + "\n" + reserved + "\n",
 	} {
 		other := filepath.Join(t.TempDir(), "jev-ledger.jsonl")
 		if err := os.WriteFile(other, []byte(lines), 0o600); err != nil {
@@ -547,5 +548,44 @@ func TestJevProxyNeverCallsWithoutADurableReservation(t *testing.T) {
 	}
 	if stats, _ := proxy.Stats(); fake.calls.Load() != 0 || stats.Upstream != 0 || stats.StopReason == "" {
 		t.Fatalf("calls %d, stats %+v", fake.calls.Load(), stats)
+	}
+}
+
+// blockingWriter fails the first write after release is closed, holding it until then.
+type blockingWriter struct {
+	entered chan struct{}
+	release chan struct{}
+	writes  atomic.Int32
+}
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	if w.writes.Add(1) == 1 {
+		close(w.entered)
+		<-w.release
+		return 0, os.ErrClosed
+	}
+	return len(p), nil
+}
+
+func TestJevProxyAdmitsNothingOnceAReservationFails(t *testing.T) {
+	fake := &fakeJev{}
+	upstream := httptest.NewServer(fake)
+	defer upstream.Close()
+	writer := &blockingWriter{entered: make(chan struct{}), release: make(chan struct{})}
+	proxy := newTestJevProxy(t, upstream, true, DefaultBudget, writer)
+	first := make(chan int, 1)
+	go func() { first <- post(t, proxy, "/v1/systemone", judgeBody(t, "first")).Code }()
+	<-writer.entered
+	second := make(chan int, 1)
+	go func() { second <- post(t, proxy, "/v1/systemone", judgeBody(t, "second")).Code }()
+	close(writer.release) // the first reservation fails while the second waits for admission
+	if code := <-first; code != http.StatusServiceUnavailable {
+		t.Fatalf("first status %d", code)
+	}
+	if code := <-second; code != http.StatusServiceUnavailable {
+		t.Fatalf("second status %d", code)
+	}
+	if fake.calls.Load() != 0 {
+		t.Fatal("a request was admitted after a reservation could not be written")
 	}
 }

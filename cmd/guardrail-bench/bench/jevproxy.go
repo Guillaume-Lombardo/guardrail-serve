@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -327,26 +326,25 @@ func (p *JevProxy) call(ctx context.Context, key string, asked jevRequest, body 
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: budget")
 	}
-	p.stats.Upstream++
-	p.stats.BodyBytes += int64(len(body))
-	p.inflightUSD += worst
-	attempt := strconv.Itoa(p.prior.Calls + p.stats.Upstream)
-	p.mu.Unlock()
-
-	// The reservation reaches the disk before the request leaves: a crash after
-	// the call still finds the worst case spent on the next start. No durable
-	// reservation, no call.
+	// The reservation reaches the disk before the request leaves, and while the
+	// admission lock is held: a crash after the call still finds the worst case
+	// spent on the next start, and once a write fails no other request can be
+	// admitted. No durable reservation, no call.
+	attempt, err := newAttemptID()
 	reserved := LedgerLine{Time: p.now().UTC().Format(time.RFC3339), Key: key[:16], BodyBytes: len(body), Billing: BillingReserved, CostUSD: worst, Attempt: attempt}
-	if err := p.ledger.record(reserved); err != nil {
-		p.mu.Lock()
-		p.inflightUSD -= worst
-		p.stats.Upstream--
-		p.stats.BodyBytes -= int64(len(body))
+	if err == nil {
+		err = p.ledger.record(reserved)
+	}
+	if err != nil {
 		p.stats.StopReason = "the ledger cannot be written"
 		p.stats.Failures++
 		p.mu.Unlock()
 		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: ledger write failed")
 	}
+	p.stats.Upstream++
+	p.stats.BodyBytes += int64(len(body))
+	p.inflightUSD += worst
+	p.mu.Unlock()
 
 	// Every attempt then settles its reservation in a second text-free line and
 	// charges its case, whether the answer is then used or not.
