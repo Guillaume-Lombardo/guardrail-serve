@@ -30,6 +30,7 @@ type fakeJev struct {
 	calls   atomic.Int32
 	status  int
 	tokens  int64
+	served  string
 	headers []string
 	bodies  []string
 }
@@ -48,8 +49,12 @@ func (f *fakeJev) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if tokens == 0 {
 		tokens = 321
 	}
+	served := f.served
+	if served == "" {
+		served = "jev-1.14.0"
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"model":   "jev-1.14.0",
+		"model":   served,
 		"answers": map[string]any{"prompt_injection": map[string]any{"type": "noul", "noul": 0.12}},
 		"usage":   map[string]int64{"input_tokens": tokens, "output_tokens": 1},
 	})
@@ -203,6 +208,22 @@ func TestJevProxyStopsOnRepeatedPaymentOrRateErrors(t *testing.T) {
 	post(t, proxy, "/v1/systemone", judgeBody(t, "b"))
 	if fake.calls.Load() != 1 {
 		t.Fatalf("401 must stop at once: %d calls", fake.calls.Load())
+	}
+}
+
+func TestJevProxyStopsWhenAnotherVersionIsServed(t *testing.T) {
+	fake := &fakeJev{served: "jev-1.15.0"}
+	upstream := httptest.NewServer(fake)
+	defer upstream.Close()
+	proxy := newTestJevProxy(t, upstream, true, DefaultBudget, nil)
+	body := judgeBody(t, "a")
+	if response := post(t, proxy, "/v1/systemone", body); response.Code != http.StatusBadGateway {
+		t.Fatalf("status %d, want 502", response.Code)
+	}
+	post(t, proxy, "/v1/systemone", body)
+	stats, _ := proxy.Stats()
+	if fake.calls.Load() != 1 || stats.StopReason == "" || stats.CostUSD != CostUSD(321) {
+		t.Fatalf("a foreign version must stop paid traffic and stay billed, uncached: calls %d, %+v", fake.calls.Load(), stats)
 	}
 }
 

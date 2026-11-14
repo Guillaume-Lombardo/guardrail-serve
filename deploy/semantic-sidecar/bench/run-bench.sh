@@ -23,7 +23,7 @@ CACHE=${BENCH_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/guardrail-bench}
 BIN=${BENCH_BIN:-$ROOT/.agent-tmp/bin/guardrail-bench}
 SUFFIX=${BENCH_SUFFIX:-$(basename "$ROOT")}
 RUNNER=${RUNNER:-}
-MODELS=(pg2-86m pg2-22m deberta-v2 sentinel qwen3guard-0.6b)
+read -r -a MODELS <<< "${BENCH_MODELS:-pg2-86m pg2-22m deberta-v2 sentinel qwen3guard-0.6b}"
 HISTORY=(french-injection-v1 original-v1)
 export GOMAXPROCS=2
 
@@ -43,6 +43,10 @@ sidecar_up() { # model -> prints base URL
     --pids-limit 128 --cpus 2 --memory 4g
     -e SIDECAR_MALICIOUS_LABELS="$(labels "$model")" -e SIDECAR_TORCH_THREADS=2 -e SIDECAR_BATCH_SIZE=8
     -e SIDECAR_INFERENCE_TIMEOUT_SECONDS=60 -e SIDECAR_REQUEST_TIMEOUT_SECONDS=90)
+  if [ "$model" = sentinel ]; then
+    # ModernBERT reaches torch inductor, which needs a user name for the non-root uid.
+    args+=(-e USER=sidecar -e TORCHINDUCTOR_CACHE_DIR=/tmp/inductor)
+  fi
   if [ "$model" = qwen3guard-0.6b ]; then
     # Prompt moderation wraps each text in the chat template: count the whole prompt.
     args+=(-e SIDECAR_MAX_TOKENS=2048 -v "$BENCH:/bench:ro" --entrypoint python "$image" /bench/qwen3guard.py serve)
@@ -83,9 +87,10 @@ case $phase in
   build)
     cd "$ROOT" && $RUNNER go build -o "$BIN" ./cmd/guardrail-bench ;;
   calibration)
-    bench run -root "$ROOT" -mode rules -corpus bench-calibration -cache-dir "$CACHE" \
+    [ -e "$OUT/calibration-rules.json" ] || bench run -root "$ROOT" -mode rules -corpus bench-calibration -cache-dir "$CACHE" \
       -run-id calibration-rules -out "$OUT/calibration-rules.json"
     for model in "${MODELS[@]}"; do
+      [ ! -e "$OUT/calibration-$model.json" ] || continue
       url=$(sidecar_up "$model")
       run_live "$model" bench-calibration frozen "calibration-$model" "$url" || { sidecar_down "$model"; exit 1; }
       sidecar_down "$model"
@@ -112,9 +117,9 @@ case $phase in
         -protocol "$RESULTS/protocol.json" -cache-dir "$CACHE" -run-id "$corpus-pg2-86m-current" -out "$OUT/$corpus-pg2-86m-current.json"
     done ;;
   judge)
-    # The key arrives on file descriptor 3 (never an argument, never the environment).
-    bench jev-models -jev-key-file /dev/fd/3 | tee "$OUT/jev-models.txt"
-    grep -q '^jev-1\.14\.0' "$OUT/jev-models.txt" || { echo "jev-1.14.0 is not listed" >&2; exit 1; }
+    # The key arrives on file descriptor 3 (never an argument, never the environment), read
+    # once. The proxy stops paid traffic if the API serves another version than jev-1.14.0;
+    # check the name beforehand with `guardrail-bench jev-probe` (one capped call).
     bench run -root "$ROOT" -mode judge -corpus bench-test -protocol "$RESULTS/protocol.json" -cache-dir "$CACHE" \
       -jev-live -jev-key-file /dev/fd/3 -run-id bench-test-jev -out "$OUT/bench-test-jev.json" -log "$OUT/bench-test-jev.log" ;;
   cascade)

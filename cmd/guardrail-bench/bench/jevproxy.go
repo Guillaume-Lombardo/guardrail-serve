@@ -248,7 +248,7 @@ func (p *JevProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var status int
-		entry, status, err = p.call(r.Context(), key, body)
+		entry, status, err = p.call(r.Context(), key, request.Model, body)
 		if err != nil {
 			p.trace.with(func(t *caseTrace) { t.judgeCalls++; t.judgeCache = "error" })
 			writeJevError(w, status, err.Error())
@@ -281,7 +281,7 @@ func (p *JevProxy) fail(fn func(*JudgeStats)) {
 
 // call sends one paid request after checking the budget. Upstream bodies are
 // never echoed: errors carry the status code only.
-func (p *JevProxy) call(ctx context.Context, key string, body []byte) (JevEntry, int, error) {
+func (p *JevProxy) call(ctx context.Context, key, model string, body []byte) (JevEntry, int, error) {
 	p.mu.Lock()
 	switch {
 	case p.stats.StopReason != "":
@@ -365,6 +365,11 @@ func (p *JevProxy) call(ctx context.Context, key string, body []byte) (JevEntry,
 	p.stats.InputTokens += tokens
 	p.stats.CostUSD += cost
 	p.mu.Unlock()
+	if decoded.Model != model {
+		// A different version would be measured under the pinned name: stop, keep nothing.
+		p.stop("upstream served another model version")
+		return JevEntry{}, http.StatusBadGateway, errors.New("upstream served another model version")
+	}
 	entry := JevEntry{Model: decoded.Model, Answers: decoded.Answers, Usage: decoded.Usage, UpstreamMS: elapsed}
 	if err := p.cache.Put(key, entry); err != nil {
 		return JevEntry{}, http.StatusInternalServerError, errors.New("cache failure")
