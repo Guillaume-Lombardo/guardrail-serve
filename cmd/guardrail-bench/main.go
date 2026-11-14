@@ -91,6 +91,9 @@ func runCommand(ctx context.Context, args []string, stdout io.Writer) error {
 	if *out == "" || *runID == "" || *corpus == "" {
 		return errors.New("run needs -corpus, -run-id and -out")
 	}
+	if *corpus != bench.CorpusCalibration && *protocolPath == "" {
+		return errors.New("every corpus but the calibration split needs -protocol")
+	}
 	parsedMode, err := bench.ParseMode(*mode)
 	if err != nil {
 		return err

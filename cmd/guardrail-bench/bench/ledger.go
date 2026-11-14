@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 )
 
 // LedgerTotals is what earlier attempts recorded in a ledger already cost.
@@ -22,6 +23,7 @@ type LedgerTotals struct {
 // is held under an exclusive lock for its whole life, so two processes can
 // never spend against the same caps at the same time.
 type Ledger struct {
+	mu    sync.Mutex
 	w     io.Writer
 	file  *os.File
 	prior LedgerTotals
@@ -47,8 +49,12 @@ func OpenLedger(path string) (*Ledger, error) {
 	return &Ledger{w: file, file: file, prior: prior}, nil
 }
 
+// readLedger sums past attempts. A reservation counts its worst case until a
+// settlement line of the same attempt replaces it with the settled cost; lines
+// written before reservations existed are complete attempts on their own.
 func readLedger(r io.Reader) (LedgerTotals, error) {
 	var totals LedgerTotals
+	open := map[string]float64{}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 4096), 1<<20)
 	for n := 1; scanner.Scan(); n++ {
@@ -60,12 +66,30 @@ func readLedger(r io.Reader) (LedgerTotals, error) {
 		if err := json.Unmarshal(data, &line); err != nil || line.CostUSD < 0 {
 			return LedgerTotals{}, fmt.Errorf("line %d is not a ledger line", n)
 		}
-		// An attempt of unknown billing already records the worst case as its cost.
-		totals.Calls++
-		totals.SpentUSD += line.CostUSD
+		switch {
+		case line.Billing == BillingReserved:
+			if _, dup := open[line.Attempt]; dup || line.Attempt == "" {
+				return LedgerTotals{}, fmt.Errorf("line %d repeats or lacks a reservation id", n)
+			}
+			open[line.Attempt] = line.CostUSD
+			totals.Calls++
+		case line.Attempt != "":
+			if _, ok := open[line.Attempt]; !ok {
+				return LedgerTotals{}, fmt.Errorf("line %d settles no open reservation", n)
+			}
+			delete(open, line.Attempt)
+			// An attempt of unknown billing records the worst case as its cost.
+			totals.SpentUSD += line.CostUSD
+		default:
+			totals.Calls++
+			totals.SpentUSD += line.CostUSD
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return LedgerTotals{}, err
+	}
+	for _, worst := range open {
+		totals.SpentUSD += worst // never settled: a crash after the call, or a failed write
 	}
 	return totals, nil
 }
@@ -73,7 +97,22 @@ func readLedger(r io.Reader) (LedgerTotals, error) {
 // Prior is what the ledger held when it was opened.
 func (l *Ledger) Prior() LedgerTotals { return l.prior }
 
-func (l *Ledger) Write(p []byte) (int, error) { return l.w.Write(p) }
+// record appends one line and, for a file ledger, syncs it to disk.
+func (l *Ledger) record(line LedgerLine) error {
+	encoded, err := json.Marshal(line)
+	if err != nil {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, err := l.w.Write(append(encoded, '\n')); err != nil {
+		return err
+	}
+	if l.file != nil {
+		return l.file.Sync()
+	}
+	return nil
+}
 
 // Close releases the lock.
 func (l *Ledger) Close() error {

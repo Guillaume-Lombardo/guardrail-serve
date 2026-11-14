@@ -693,7 +693,7 @@ the orchestrator.
   answer, invalid usage); every attempt is ledgered; paid traffic stops when another
   model version is served; answers are reduced to the `noul` value before caching.
 - Final review fixes (14/11/2026): caps cumulative over a locked ledger (a rerun cannot
-  reset them); billed errors and unknown-billing reservations charged to their case and
+  reset them), with each worst-case reservation synced to it before the call; billed errors and unknown-billing reservations charged to their case and
   published apart; the CLI refuses an uncommitted or edited protocol and records its
   commit; cached answers reduced again on read; the report checks judge decisions
   against the recorded probability and refuses repeated runs with another coverage.

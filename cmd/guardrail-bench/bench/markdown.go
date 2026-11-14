@@ -36,7 +36,7 @@ func Markdown(results *Results) string {
 				cost = fmt.Sprintf("%.4f", *row.USDPer1000)
 			}
 			if row.UnknownUSD > 0 {
-				cost += fmt.Sprintf(" + USD %.6f unknown billing", row.UnknownUSD)
+				cost += fmt.Sprintf(" (plus USD %.6f in total of unknown billing)", row.UnknownUSD)
 			}
 			if row.VersusRef != nil {
 				mcnemar = fmt.Sprintf("%.3f (%d/%d)", row.VersusRef.PValue, row.VersusRef.OnlyA, row.VersusRef.OnlyB)

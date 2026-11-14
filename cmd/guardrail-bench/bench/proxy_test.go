@@ -122,8 +122,8 @@ func TestJevProxyCachesAndNeverCallsTwice(t *testing.T) {
 		t.Fatalf("cost accounting %+v", stats)
 	}
 	text := ledger.String()
-	if strings.Count(text, "\n") != 1 || strings.Contains(text, "Ignore") || strings.Contains(text, testKey) || strings.Contains(text, "EMAIL") {
-		t.Fatalf("ledger must hold one text-free, key-free line: %q", text)
+	if strings.Count(text, "\n") != 2 || strings.Count(text, `"billing":"reserved"`) != 1 || strings.Contains(text, "Ignore") || strings.Contains(text, testKey) || strings.Contains(text, "EMAIL") {
+		t.Fatalf("ledger must hold one text-free, key-free reservation and settlement: %q", text)
 	}
 }
 
@@ -272,7 +272,7 @@ func TestJevProxyLedgersTransportFailures(t *testing.T) {
 		t.Fatalf("status %d", response.Code)
 	}
 	stats, _ := proxy.Stats()
-	if strings.Count(ledger.String(), "\n") != 1 || stats.UnknownBillingUSD != WorstCaseUSD() {
+	if strings.Count(ledger.String(), `"billing":"unknown"`) != 1 || stats.UnknownBillingUSD != WorstCaseUSD() {
 		t.Fatalf("ledger %q, stats %+v", ledger.String(), stats)
 	}
 }
@@ -497,5 +497,55 @@ func TestJevProxyReducesCachedEntriesAgain(t *testing.T) {
 	invalid := put("invalid", `{"type":"noul","noul":3}`)
 	if response := post(t, proxy, "/v1/systemone", invalid); response.Code != http.StatusBadGateway {
 		t.Fatalf("an invalid cache entry was forwarded: %d", response.Code)
+	}
+}
+
+func TestJevLedgerKeepsUnsettledReservationsAsSpent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jev-ledger.jsonl")
+	legacy := `{"status":200,"input_tokens":339,"cost_usd":0.000014,"billing":"known"}`
+	reserved := `{"billing":"reserved","cost_usd":0.002688,"attempt":"2"}`
+	settled := `{"billing":"known","cost_usd":0.00002,"attempt":"2"}`
+	crashed := `{"billing":"reserved","cost_usd":0.002688,"attempt":"3"}` // the process died after sending
+	if err := os.WriteFile(path, []byte(strings.Join([]string{legacy, reserved, settled, crashed}, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := OpenLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ledger.Close()
+	prior := ledger.Prior()
+	near(t, "spent", prior.SpentUSD, 0.000014+0.00002+0.002688)
+	if prior.Calls != 3 {
+		t.Fatalf("calls %d", prior.Calls)
+	}
+	for name, lines := range map[string]string{
+		"orphan settlement":    settled + "\n",
+		"repeated reservation": reserved + "\n" + reserved + "\n",
+	} {
+		other := filepath.Join(t.TempDir(), "jev-ledger.jsonl")
+		if err := os.WriteFile(other, []byte(lines), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := OpenLedger(other); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
+
+func TestJevProxyNeverCallsWithoutADurableReservation(t *testing.T) {
+	fake := &fakeJev{}
+	upstream := httptest.NewServer(fake)
+	defer upstream.Close()
+	proxy := newTestJevProxy(t, upstream, true, DefaultBudget, failingWriter{})
+	if response := post(t, proxy, "/v1/systemone", judgeBody(t, "a")); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d", response.Code)
+	}
+	if stats, _ := proxy.Stats(); fake.calls.Load() != 0 || stats.Upstream != 0 || stats.StopReason == "" {
+		t.Fatalf("calls %d, stats %+v", fake.calls.Load(), stats)
 	}
 }

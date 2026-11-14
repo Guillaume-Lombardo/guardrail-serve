@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -72,6 +73,8 @@ type LedgerLine struct {
 	MS          float64 `json:"ms"`
 	BodyBytes   int     `json:"body_bytes"`
 	Billing     string  `json:"billing"`
+	// Attempt pairs the reservation written before a call with its settlement.
+	Attempt string `json:"attempt,omitempty"`
 }
 
 // Egress leak guard: independent of the service's masking patterns, it
@@ -116,7 +119,7 @@ type JevProxy struct {
 	key      []byte
 	cache    *Cache
 	budget   Budget
-	ledger   io.Writer
+	ledger   *Ledger
 	client   *http.Client
 	trace    *tracer
 	delay    bool
@@ -164,14 +167,14 @@ func newJevProxy(cfg JevProxyConfig, trace *tracer) (*JevProxy, error) {
 			Timeout:       30 * time.Second,
 		}
 	}
-	var ledger io.Writer = io.Discard
-	var prior LedgerTotals
+	ledger := &Ledger{w: io.Discard}
 	switch {
 	case cfg.Ledger != nil:
-		ledger, prior = cfg.Ledger, cfg.Ledger.Prior()
+		ledger = cfg.Ledger
 	case cfg.Live:
 		return nil, errors.New("live judge mode needs the durable ledger")
 	}
+	prior := ledger.Prior()
 	return &JevProxy{
 		live: cfg.Live, upstream: cfg.Upstream, key: cfg.Key, cache: cfg.Cache, budget: cfg.Budget,
 		ledger: ledger, client: client, trace: trace, delay: cfg.Delay, now: time.Now, prior: prior, leaks: map[string]int{},
@@ -327,11 +330,27 @@ func (p *JevProxy) call(ctx context.Context, key string, asked jevRequest, body 
 	p.stats.Upstream++
 	p.stats.BodyBytes += int64(len(body))
 	p.inflightUSD += worst
+	attempt := strconv.Itoa(p.prior.Calls + p.stats.Upstream)
 	p.mu.Unlock()
 
-	// Every attempt leaves one text-free ledger line, settles its reservation
-	// and charges its case, whether the answer is then used or not.
-	line := LedgerLine{Time: p.now().UTC().Format(time.RFC3339), Key: key[:16], BodyBytes: len(body), Billing: BillingUnknown}
+	// The reservation reaches the disk before the request leaves: a crash after
+	// the call still finds the worst case spent on the next start. No durable
+	// reservation, no call.
+	reserved := LedgerLine{Time: p.now().UTC().Format(time.RFC3339), Key: key[:16], BodyBytes: len(body), Billing: BillingReserved, CostUSD: worst, Attempt: attempt}
+	if err := p.ledger.record(reserved); err != nil {
+		p.mu.Lock()
+		p.inflightUSD -= worst
+		p.stats.Upstream--
+		p.stats.BodyBytes -= int64(len(body))
+		p.stats.StopReason = "the ledger cannot be written"
+		p.stats.Failures++
+		p.mu.Unlock()
+		return JevEntry{}, http.StatusServiceUnavailable, errors.New("paid traffic stopped: ledger write failed")
+	}
+
+	// Every attempt then settles its reservation in a second text-free line and
+	// charges its case, whether the answer is then used or not.
+	line := LedgerLine{Time: reserved.Time, Key: reserved.Key, BodyBytes: len(body), Billing: BillingUnknown, Attempt: attempt}
 	defer func() {
 		p.mu.Lock()
 		p.inflightUSD -= worst
@@ -353,8 +372,12 @@ func (p *JevProxy) call(ctx context.Context, key string, asked jevRequest, body 
 				t.unknownUSD += worst
 			}
 		})
-		encoded, _ := json.Marshal(line)
-		_, _ = p.ledger.Write(append(encoded, '\n'))
+		if err := p.ledger.record(line); err != nil {
+			// The reservation stays on disk as the worst case: stop, never undercount.
+			p.mu.Lock()
+			p.stats.StopReason = "the ledger cannot be written"
+			p.mu.Unlock()
+		}
 	}()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.upstream, bytes.NewReader(body))
@@ -440,6 +463,8 @@ const (
 	BillingKnown   = "known"   // usage reported: the input tokens are billed
 	BillingNone    = "none"    // refused before inference (4xx): nothing billed
 	BillingUnknown = "unknown" // outcome unknown: the worst case is counted as spent
+	// BillingReserved is the worst case written before a call, until settled.
+	BillingReserved = "reserved"
 )
 
 type jevResponse struct {

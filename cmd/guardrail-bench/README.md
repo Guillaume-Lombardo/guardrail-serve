@@ -37,8 +37,11 @@ guardrail-bench jev-probe  -jev-key-file /dev/fd/3 [-model jev-1.14.0]
   documented request maximum). An attempt whose billing is unknown (transport failure,
   5xx, unreadable answer, invalid usage) keeps that worst case as spent. It stops on a
   401, after two consecutive 402/429, at the call or dollar cap, and when the API serves
-  another model version than the one requested. Every attempt appends one text-free
-  line to `jev-ledger.jsonl` in the cache directory, and charges its case (billed tokens,
+  another model version than the one requested. Every attempt appends two text-free
+  lines to `jev-ledger.jsonl` in the cache directory: the worst-case reservation,
+  synced to disk before the request leaves (no durable reservation, no call), then its
+  settlement. A reservation never settled (a crash, a failed write) stays counted as the
+  worst case. The attempt also charges its case (billed tokens,
   or the worst case when the billing is unknown, published apart). Answers are reduced
   to the asked question's `noul` probability before they are cached or forwarded, and
   a cached answer is reduced again when read (an entry that does not fit is an error).
@@ -46,7 +49,8 @@ guardrail-bench jev-probe  -jev-key-file /dev/fd/3 [-model jev-1.14.0]
   (`jev-latest`, `jev-preview`); `jev-probe` sends one call on a fixed benign text,
   under the same ledger and cumulative caps, to check that a versioned name is served.
 - `cascade` replays both caches: no inference and no paid call.
-- `run` (on any corpus but calibration), `export` and `report` refuse a protocol file
+- `run` needs `-protocol` on every corpus but the calibration split. `run`, `export`
+  and `report` refuse a protocol file
   that is not committed in Git or differs from its committed version; `run` records the
   commit in the run file.
 - `report` loads the canonical corpora from `-root` and refuses a run that does not

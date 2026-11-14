@@ -79,7 +79,7 @@ func (c RunConfig) Validate() error {
 	if c.Mode == ModeCascade && (c.JevLive || c.SidecarURL != "") {
 		return errors.New("the cascade replays cached scores and judge answers only")
 	}
-	if c.Corpus != CorpusCalibration && c.Mode != ModeRules && c.Protocol == nil {
+	if c.Corpus != CorpusCalibration && c.Protocol == nil {
 		return fmt.Errorf("corpus %s needs the frozen protocol", c.Corpus)
 	}
 	if c.Corpus == CorpusCalibration && c.Mode != ModeRules && c.Mode != ModeUnion {

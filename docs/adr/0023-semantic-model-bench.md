@@ -58,8 +58,10 @@ can trust and rebuild:
    a server-side overhead, so the body size is no bound) before sending. An attempt whose
    billing cannot be known (transport failure, 5xx, unreadable answer, invalid usage)
    keeps that worst case as spent. It stops on 401, after two consecutive 402/429, and
-   when the API serves another model version than the requested one, and appends a
-   text-free ledger line per attempt; billed tokens and unknown-billing reservations are
+   when the API serves another model version than the requested one. Each attempt
+   writes a text-free worst-case reservation to the ledger, synced before the request
+   leaves (no durable reservation, no call), then its settlement; an unsettled
+   reservation stays spent; billed tokens and unknown-billing reservations are
    charged to their case even when the answer is an error.
 5. **Protocol frozen from calibration, then enforced.** `calibrate` applies R1 (lowest
    threshold keeping rules ∪ model calibration false positives ≤ floor(5% × negatives),
